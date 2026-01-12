@@ -1,0 +1,131 @@
+@import "tailwindcss";
+
+@layer base {
+	html,
+	body,
+	#root {
+		width: 100%;
+		max-width: 100vw;
+		overflow-x: hidden !important;
+	}
+
+	html {
+		@apply h-full;
+	}
+
+	#root {
+		@apply min-h-full;
+	}
+
+	body {
+		@apply min-h-full text-zinc-900 antialiased;
+		@apply bg-linear-to-br from-zinc-50 via-white to-emerald-100;
+	}
+
+	::selection {
+		@apply bg-zinc-900 text-white;
+	}
+}
+
+@layer components {
+	.ui-page {
+		@apply min-h-screen;
+		@apply bg-linear-to-br from-zinc-50 via-white to-emerald-100;
+	}
+
+	.ui-container {
+		@apply mx-auto w-full max-w-6xl px-4 py-8 sm:px-6;
+	}
+
+	.ui-header {
+		@apply mb-8;
+	}
+
+	.ui-hero {
+		@apply rounded-3xl border border-white/40 p-6 sm:p-8;
+		@apply bg-linear-to-br from-zinc-950 via-zinc-900 to-zinc-950;
+		@apply text-white shadow-xl shadow-zinc-900/10;
+		@apply ring-1 ring-white/10;
+	}
+
+	.ui-hero-title {
+		@apply text-3xl font-semibold tracking-tight sm:text-4xl;
+	}
+
+	.ui-hero-subtitle {
+		@apply mt-2 text-sm text-white/70 sm:text-base;
+	}
+
+	.ui-title {
+		@apply text-3xl font-semibold tracking-tight text-zinc-900 sm:text-4xl;
+	}
+
+	.ui-subtitle {
+		@apply mt-2 text-sm text-zinc-600 sm:text-base;
+	}
+
+	.ui-card {
+		@apply rounded-2xl border border-white/70 bg-white/75;
+		@apply ring-1 ring-zinc-900/5 backdrop-blur;
+		@apply shadow-lg shadow-zinc-900/5;
+	}
+
+	.ui-card-pad {
+		@apply p-5 sm:p-6;
+	}
+
+	.ui-input {
+		@apply w-full rounded-xl border border-zinc-200 bg-white/70 px-4 py-3 text-sm text-zinc-900 shadow-sm outline-none transition;
+		@apply placeholder:text-zinc-400 focus:border-zinc-900 focus:ring-4 focus:ring-emerald-500/10;
+	}
+
+	.ui-select {
+		@apply w-full rounded-xl border border-zinc-200 bg-white/70 px-4 py-3 text-sm text-zinc-900 shadow-sm outline-none transition;
+		@apply focus:border-zinc-900 focus:ring-4 focus:ring-emerald-500/10;
+	}
+
+	.ui-label {
+		@apply block text-xs font-medium text-zinc-600;
+	}
+
+	.ui-btn {
+		@apply inline-flex items-center justify-center rounded-xl px-4 py-3 text-sm font-semibold transition;
+		@apply focus:outline-none focus:ring-4 focus:ring-zinc-900/10 disabled:cursor-not-allowed disabled:opacity-50;
+	}
+
+	.ui-btn-primary {
+		@apply inline-flex items-center justify-center rounded-xl px-4 py-3 text-sm font-semibold transition;
+		@apply focus:outline-none focus:ring-4 focus:ring-emerald-500/15 disabled:cursor-not-allowed disabled:opacity-50;
+		@apply bg-linear-to-b from-zinc-900 to-zinc-800 text-white;
+		@apply shadow-sm shadow-zinc-900/10 hover:from-zinc-800 hover:to-zinc-700;
+	}
+
+	.ui-btn-secondary {
+		@apply inline-flex items-center justify-center rounded-xl px-4 py-3 text-sm font-semibold transition;
+		@apply focus:outline-none focus:ring-4 focus:ring-emerald-500/15 disabled:cursor-not-allowed disabled:opacity-50;
+		@apply border border-zinc-200 bg-white/70 text-zinc-900 hover:bg-white;
+	}
+
+	.ui-btn-success {
+		@apply inline-flex items-center justify-center rounded-xl px-4 py-3 text-sm font-semibold transition;
+		@apply focus:outline-none focus:ring-4 focus:ring-emerald-500/15 disabled:cursor-not-allowed disabled:opacity-50;
+		@apply bg-linear-to-b from-emerald-600 to-emerald-700 text-white;
+		@apply shadow-sm shadow-emerald-900/10 hover:from-emerald-500 hover:to-emerald-700;
+	}
+
+	.ui-link {
+		@apply text-sm font-semibold text-zinc-900 underline decoration-zinc-300 underline-offset-4 hover:decoration-zinc-900;
+	}
+
+	.ui-pill {
+		@apply inline-flex items-center rounded-full border border-zinc-200 bg-white px-3 py-1 text-xs font-medium text-zinc-700;
+	}
+
+	.ui-badge-success {
+		@apply inline-flex items-center rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-700;
+	}
+
+	.ui-badge-danger {
+		@apply inline-flex items-center rounded-full bg-rose-50 px-2.5 py-1 text-xs font-semibold text-rose-700;
+	}
+}

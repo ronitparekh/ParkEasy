@@ -1,0 +1,32 @@
+# OS / tooling
+.DS_Store
+Thumbs.db
+
+# Environment files
+.env
+.env.*
+!**/.env.example
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Dependencies
+node_modules/
+
+# Build outputs
+/dist/
+/build/
+
+# Local IDE
+.vscode/
+.idea/
+
+# Archives
+*.zip
+
+# Vite / misc caches
+.eslintcache
+.vite/
