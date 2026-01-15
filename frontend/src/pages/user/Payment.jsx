@@ -197,6 +197,14 @@ export default function Payment() {
                         </div>
                     ) : null}
 
+                    {keyId && keyId.startsWith("rzp_test_") ? (
+                        <div className="mb-4 text-sm text-amber-200 bg-amber-500/10 border border-amber-500/20 rounded-xl p-3">
+                            Razorpay is in <b>TEST</b> mode. You won’t receive a real SMS OTP — the
+                            checkout shows a simulated OTP screen. Use the test OTP <b>123456</b>
+                            (as per Razorpay test flow).
+                        </div>
+                    ) : null}
+
                     <button
                         onClick={handlePayment}
                         disabled={loadingOrder || paying || !orderId}
