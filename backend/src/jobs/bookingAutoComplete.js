@@ -1,6 +1,7 @@
 import cron from "node-cron";
 import Booking from "../models/Booking.js";
 import Parking from "../models/Parking.js";
+import { getBookingStartEndIst } from "../utils/ist.js";
 
 export const startBookingAutoCompleteJob = () => {
   cron.schedule("* * * * *", async () => {
@@ -12,21 +13,10 @@ export const startBookingAutoCompleteJob = () => {
       });
 
       for (const booking of activeBookings) {
-        const baseDate = booking.bookingDate
-          ? new Date(booking.bookingDate)
-          : new Date(booking.createdAt);
+        const { end } = getBookingStartEndIst(booking);
+        if (!end) continue;
 
-        const [endHRaw, endMRaw] = String(booking.endTime || "").split(":");
-        const endH = Number(endHRaw);
-        const endM = Number(endMRaw);
-        if (Number.isNaN(endH) || Number.isNaN(endM)) {
-          continue;
-        }
-
-        const bookingEnd = new Date(baseDate);
-        bookingEnd.setHours(endH, endM, 0, 0);
-
-        if (bookingEnd <= now) {
+        if (end <= now) {
           booking.status = "COMPLETED";
           await booking.save();
 

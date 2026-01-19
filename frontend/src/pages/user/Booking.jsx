@@ -13,9 +13,13 @@ export default function Booking() {
     const [customerName, setCustomerName] = useState("");
     const [customerEmail, setCustomerEmail] = useState("");
     const [customerPhone, setCustomerPhone] = useState("");
-    const [bookingDate, setBookingDate] = useState(
-        new Date().toISOString().split("T")[0]
-    );
+    const [bookingDate, setBookingDate] = useState(() => {
+        const d = new Date();
+        const yyyy = d.getFullYear();
+        const mm = String(d.getMonth() + 1).padStart(2, "0");
+        const dd = String(d.getDate()).padStart(2, "0");
+        return `${yyyy}-${mm}-${dd}`;
+    });
     const [startTime, setStartTime] = useState("");
     const [endTime, setEndTime] = useState("");
 

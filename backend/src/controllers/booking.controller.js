@@ -2,6 +2,13 @@ import Booking from "../models/Booking.js";
 import Parking from "../models/Parking.js";
 import User from "../models/User.js";
 import { normalizePlate } from "../utils/plate.js";
+import {
+  formatIstDateYmd,
+  getBookingStartEndIst,
+  getTodayIstRange,
+  makeUtcDateFromIstParts,
+  parseYmd,
+} from "../utils/ist.js";
 
 function requireOwner(req, res) {
   if (req.user?.role !== "OWNER") {
@@ -12,39 +19,12 @@ function requireOwner(req, res) {
 }
 
 function getTodayRange() {
-  const now = new Date();
-  const start = new Date(now);
-  start.setHours(0, 0, 0, 0);
-  const end = new Date(start);
-  end.setDate(end.getDate() + 1);
-  return { start, end, now };
+  // Production servers often run in UTC; bookings are intended for IST.
+  return getTodayIstRange(new Date());
 }
 
 function getBookingStartEnd(booking) {
-  const baseDate = booking.bookingDate
-    ? new Date(booking.bookingDate)
-    : new Date(booking.createdAt);
-
-  const [startHRaw, startMRaw] = String(booking.startTime || "").split(":");
-  const [endHRaw, endMRaw] = String(booking.endTime || "").split(":");
-  const startH = Number(startHRaw);
-  const startM = Number(startMRaw);
-  const endH = Number(endHRaw);
-  const endM = Number(endMRaw);
-  if (
-    Number.isNaN(startH) ||
-    Number.isNaN(startM) ||
-    Number.isNaN(endH) ||
-    Number.isNaN(endM)
-  ) {
-    return { start: null, end: null };
-  }
-
-  const start = new Date(baseDate);
-  start.setHours(startH, startM, 0, 0);
-  const end = new Date(baseDate);
-  end.setHours(endH, endM, 0, 0);
-  return { start, end };
+  return getBookingStartEndIst(booking);
 }
 
 async function assertOwnerOwnsParking(req, res, parkingId) {
@@ -115,20 +95,30 @@ export const createBooking = async (req, res) => {
       return res.status(400).json({ message: "All fields are required" });
     }
 
-    const bookingDateStr = bookingDate || new Date().toISOString().split("T")[0];
-    const bookingDateOnly = new Date(`${bookingDateStr}T00:00:00`);
-    if (Number.isNaN(bookingDateOnly.getTime())) {
+    const bookingDateStr = bookingDate || formatIstDateYmd(new Date());
+    const ymd = parseYmd(bookingDateStr);
+    if (!ymd) {
       return res.status(400).json({ message: "Invalid booking date" });
     }
 
-    const startDateTime = new Date(`${bookingDateStr}T${startTime}`);
-    const endDateTime = new Date(`${bookingDateStr}T${endTime}`);
+    // Store as the UTC instant corresponding to IST midnight for that date.
+    const bookingDateOnly = makeUtcDateFromIstParts({ ...ymd, hour: 0, minute: 0, second: 0, ms: 0 });
+
+    const [startHRaw, startMRaw] = String(startTime).split(":");
+    const [endHRaw, endMRaw] = String(endTime).split(":");
+    const startH = Number(startHRaw);
+    const startM = Number(startMRaw);
+    const endH = Number(endHRaw);
+    const endM = Number(endMRaw);
     if (
-      Number.isNaN(startDateTime.getTime()) ||
-      Number.isNaN(endDateTime.getTime())
+      [startH, startM, endH, endM].some((n) => Number.isNaN(n))
     ) {
       return res.status(400).json({ message: "Invalid start/end time" });
     }
+
+    const startDateTime = makeUtcDateFromIstParts({ ...ymd, hour: startH, minute: startM, second: 0, ms: 0 });
+    const endDateTime = makeUtcDateFromIstParts({ ...ymd, hour: endH, minute: endM, second: 0, ms: 0 });
+
     if (endDateTime <= startDateTime) {
       return res
         .status(400)

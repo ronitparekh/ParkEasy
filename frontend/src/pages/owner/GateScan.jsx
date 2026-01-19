@@ -11,6 +11,144 @@ function normalizePlate(value) {
     .trim();
 }
 
+function scorePlateCandidate(token) {
+  const s = normalizePlate(token);
+  if (!s) return { plate: "", score: -1 };
+
+  // Typical plates are ~7-12 chars; keep it flexible.
+  const len = s.length;
+  if (len < 6 || len > 14) return { plate: s, score: 0 };
+
+  const hasLetters = /[A-Z]/.test(s);
+  const hasDigits = /\d/.test(s);
+
+  let score = 10;
+  if (hasLetters && hasDigits) score += 20;
+  if (!hasLetters || !hasDigits) score -= 10;
+
+  // Penalize suspicious runs (often OCR noise)
+  if (/(.)\1\1/.test(s)) score -= 5;
+  if (/^\d+$/.test(s) || /^[A-Z]+$/.test(s)) score -= 5;
+
+  // Prefer common-ish Indian-style structure (loose): letters+digits mix
+  if (/^[A-Z]{2}\d{1,2}[A-Z]{1,3}\d{3,4}$/.test(s)) score += 15;
+
+  // Prefer 8-11 chars mildly
+  score -= Math.abs(10 - len);
+
+  return { plate: s, score };
+}
+
+function extractBestPlateFromText(rawText) {
+  const text = String(rawText ?? "");
+
+  // Pull candidates from OCR output: alnum sequences.
+  const tokens = text
+    .toUpperCase()
+    .replace(/[^A-Z0-9\s]/g, " ")
+    .split(/\s+/)
+    .filter(Boolean);
+
+  let best = { plate: "", score: -1 };
+  for (const tok of tokens) {
+    const cand = scorePlateCandidate(tok);
+    if (cand.score > best.score) best = cand;
+  }
+
+  // Also try within a fully-normalized stream (handles OCR spacing issues).
+  const normalizedStream = normalizePlate(text);
+  if (normalizedStream.length >= 6) {
+    // Take sliding windows to find best-looking substring.
+    const minLen = 6;
+    const maxLen = Math.min(14, normalizedStream.length);
+    for (let len = minLen; len <= maxLen; len += 1) {
+      for (let i = 0; i + len <= normalizedStream.length; i += 1) {
+        const sub = normalizedStream.slice(i, i + len);
+        const cand = scorePlateCandidate(sub);
+        if (cand.score > best.score) best = cand;
+      }
+    }
+  }
+
+  return best.plate;
+}
+
+async function loadImage(dataUrl) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => resolve(img);
+    img.onerror = reject;
+    img.src = dataUrl;
+  });
+}
+
+function canvasToDataUrl(canvas) {
+  return canvas.toDataURL("image/png");
+}
+
+function preprocessVariants(img) {
+  const variants = [];
+
+  // Use a reasonable max size for speed on mobile.
+  const maxW = 1400;
+  const scale = Math.min(1, maxW / (img.naturalWidth || img.width || maxW));
+  const w = Math.max(1, Math.round((img.naturalWidth || img.width) * scale));
+  const h = Math.max(1, Math.round((img.naturalHeight || img.height) * scale));
+
+  const baseCanvas = document.createElement("canvas");
+  baseCanvas.width = w;
+  baseCanvas.height = h;
+  const baseCtx = baseCanvas.getContext("2d", { willReadFrequently: true });
+  baseCtx.drawImage(img, 0, 0, w, h);
+  variants.push({ name: "full", dataUrl: canvasToDataUrl(baseCanvas) });
+
+  // Crops that often help: center strip, and lower-center strip.
+  const crops = [
+    { name: "center", x: 0.10, y: 0.35, ww: 0.80, hh: 0.35 },
+    { name: "lower", x: 0.10, y: 0.50, ww: 0.80, hh: 0.40 },
+    { name: "tight", x: 0.15, y: 0.45, ww: 0.70, hh: 0.30 },
+  ];
+
+  for (const c of crops) {
+    const cx = Math.max(0, Math.round(w * c.x));
+    const cy = Math.max(0, Math.round(h * c.y));
+    const cw = Math.max(1, Math.round(w * c.ww));
+    const ch = Math.max(1, Math.round(h * c.hh));
+
+    const cropCanvas = document.createElement("canvas");
+    cropCanvas.width = cw;
+    cropCanvas.height = ch;
+    const cropCtx = cropCanvas.getContext("2d", { willReadFrequently: true });
+    cropCtx.drawImage(baseCanvas, cx, cy, cw, ch, 0, 0, cw, ch);
+    variants.push({ name: c.name, dataUrl: canvasToDataUrl(cropCanvas) });
+
+    // Preprocess crop: grayscale + contrast + threshold
+    const imgData = cropCtx.getImageData(0, 0, cw, ch);
+    const data = imgData.data;
+
+    // Simple contrast stretch + threshold.
+    for (let i = 0; i < data.length; i += 4) {
+      const r = data[i];
+      const g = data[i + 1];
+      const b = data[i + 2];
+      // Luma
+      let y = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+      // Boost contrast (centered)
+      y = (y - 128) * 1.35 + 128;
+      // Threshold
+      const v = y > 150 ? 255 : 0;
+      data[i] = v;
+      data[i + 1] = v;
+      data[i + 2] = v;
+      data[i + 3] = 255;
+    }
+    cropCtx.putImageData(imgData, 0, 0);
+    variants.push({ name: `${c.name}-bw`, dataUrl: canvasToDataUrl(cropCanvas) });
+  }
+
+  return variants;
+}
+
 export default function GateScan() {
   const [params] = useSearchParams();
   const parkingId = params.get("parkingId") || "";
@@ -23,6 +161,7 @@ export default function GateScan() {
   const [plateText, setPlateText] = useState("");
   const [ocrBusy, setOcrBusy] = useState(false);
   const [ocrProgress, setOcrProgress] = useState(0);
+  const [ocrHint, setOcrHint] = useState("");
   const [apiBusy, setApiBusy] = useState(false);
   const [result, setResult] = useState(null);
   const [error, setError] = useState("");
@@ -33,6 +172,7 @@ export default function GateScan() {
   const videoRef = useRef(null);
   const streamRef = useRef(null);
   const scanLoopRef = useRef({ running: false, rafId: null });
+  const ocrWorkerRef = useRef(null);
 
   const plateNormalized = useMemo(() => normalizePlate(plateText), [plateText]);
 
@@ -40,8 +180,40 @@ export default function GateScan() {
     return () => {
       stopCamera();
       stopQrScan();
+      // Terminate OCR worker to free memory on mobile.
+      if (ocrWorkerRef.current) {
+        try {
+          ocrWorkerRef.current.terminate();
+        } catch {
+          // ignore
+        }
+      }
+      ocrWorkerRef.current = null;
     };
   }, []);
+
+  async function getOcrWorker() {
+    if (ocrWorkerRef.current) return ocrWorkerRef.current;
+
+    // Tesseract.js v5: createWorker is available via Tesseract
+    const worker = await Tesseract.createWorker("eng", 1, {
+      logger: (m) => {
+        if (m?.status === "recognizing text" && typeof m.progress === "number") {
+          setOcrProgress(m.progress);
+        }
+      },
+    });
+
+    // OCR tuning for license plates
+    await worker.setParameters({
+      tessedit_char_whitelist: "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789",
+      preserve_interword_spaces: "1",
+      // PSM 7 = single text line; 6 = single block; we’ll try both via re-init calls.
+    });
+
+    ocrWorkerRef.current = worker;
+    return worker;
+  }
 
   async function startCamera() {
     try {
@@ -53,9 +225,25 @@ export default function GateScan() {
       }
 
       const stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: { ideal: "environment" } },
+        video: {
+          facingMode: { ideal: "environment" },
+          width: { ideal: 1920 },
+          height: { ideal: 1080 },
+        },
         audio: false,
       });
+
+      // Try enabling continuous autofocus on supported devices.
+      try {
+        const [track] = stream.getVideoTracks();
+        if (track?.applyConstraints) {
+          await track.applyConstraints({
+            advanced: [{ focusMode: "continuous" }],
+          });
+        }
+      } catch {
+        // ignore if unsupported
+      }
 
       streamRef.current = stream;
       if (videoRef.current) {
@@ -103,6 +291,7 @@ export default function GateScan() {
     try {
       setError("");
       setResult(null);
+      setOcrHint("");
 
       const dataUrl = capturedDataUrl || captureFrame();
       if (!dataUrl) {
@@ -112,23 +301,51 @@ export default function GateScan() {
       setOcrBusy(true);
       setOcrProgress(0);
 
-      const res = await Tesseract.recognize(dataUrl, "eng", {
-        logger: (m) => {
-          if (m?.status === "recognizing text" && typeof m.progress === "number") {
-            setOcrProgress(m.progress);
+      const img = await loadImage(dataUrl);
+      const variants = preprocessVariants(img);
+      const worker = await getOcrWorker();
+
+      // Run multiple OCR passes; pick best plate-like token.
+      let best = { plate: "", score: -1, source: "" };
+      const psmModes = ["7", "6"]; // line, then block
+
+      for (const { name, dataUrl: vUrl } of variants) {
+        for (const psm of psmModes) {
+          setOcrHint(`Scanning ${name} (psm ${psm})…`);
+          // Note: setParameters is cheap vs re-creating worker
+          await worker.setParameters({ tessedit_pageseg_mode: psm });
+
+          const res = await worker.recognize(vUrl);
+          const raw = String(res?.data?.text ?? "");
+          const plate = extractBestPlateFromText(raw);
+          const cand = scorePlateCandidate(plate);
+
+          // Also consider Tesseract confidence
+          const conf = typeof res?.data?.confidence === "number" ? res.data.confidence : 0;
+          const combinedScore = cand.score + conf / 5;
+          if (combinedScore > best.score) {
+            best = { plate: cand.plate, score: combinedScore, source: `${name}/psm${psm}` };
           }
-        },
-      });
 
-      const raw = String(res?.data?.text ?? "");
-      const normalized = normalizePlate(raw);
-
-      if (!normalized) {
-        setPlateText(raw.trim());
-        throw new Error("OCR ran, but plate text looks empty. Try closer / better lighting, or type manually.");
+          // Fast exit if very good
+          if (best.score >= 45 && best.plate.length >= 8) {
+            break;
+          }
+        }
+        if (best.score >= 45 && best.plate.length >= 8) {
+          break;
+        }
       }
 
-      setPlateText(normalized);
+      if (!best.plate) {
+        setPlateText("");
+        throw new Error(
+          "Couldn’t reliably detect the plate. Try: fill the frame with the plate, avoid glare, keep it level, or type manually."
+        );
+      }
+
+      setPlateText(best.plate);
+      setOcrHint(`Best match from ${best.source}`);
     } catch (e) {
       setError(e?.message || "OCR failed");
     } finally {
@@ -317,6 +534,14 @@ export default function GateScan() {
               <div className="mt-4 rounded-2xl overflow-hidden border border-white/10 bg-black/20">
                 <video ref={videoRef} className="w-full h-64 object-cover" playsInline muted />
               </div>
+
+              {ocrBusy ? (
+                <p className="mt-3 text-xs text-gray-300">
+                  {ocrHint || "Running OCR…"} {typeof ocrProgress === "number" ? `(${Math.round(ocrProgress * 100)}%)` : ""}
+                </p>
+              ) : ocrHint ? (
+                <p className="mt-3 text-xs text-gray-400">{ocrHint}</p>
+              ) : null}
 
               <div className="mt-3 flex flex-wrap gap-2">
                 {!cameraOn ? (

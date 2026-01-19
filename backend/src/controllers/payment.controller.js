@@ -3,6 +3,11 @@ import Razorpay from "razorpay";
 import Booking from "../models/Booking.js";
 import Parking from "../models/Parking.js";
 import User from "../models/User.js";
+import {
+  formatIstDateYmd,
+  makeUtcDateFromIstParts,
+  parseYmd,
+} from "../utils/ist.js";
 
 function getRazorpayClient() {
   const keyId = process.env.RAZORPAY_KEY_ID;
@@ -57,17 +62,27 @@ export async function createRazorpayOrder(req, res) {
       return res.status(400).json({ message: "All fields are required" });
     }
 
-    const bookingDateStr = bookingDate || new Date().toISOString().split("T")[0];
-    const bookingDateOnly = new Date(`${bookingDateStr}T00:00:00`);
-    if (Number.isNaN(bookingDateOnly.getTime())) {
+    const bookingDateStr = bookingDate || formatIstDateYmd(new Date());
+    const ymd = parseYmd(bookingDateStr);
+    if (!ymd) {
       return res.status(400).json({ message: "Invalid booking date" });
     }
 
-    const startDateTime = new Date(`${bookingDateStr}T${startTime}`);
-    const endDateTime = new Date(`${bookingDateStr}T${endTime}`);
-    if (Number.isNaN(startDateTime.getTime()) || Number.isNaN(endDateTime.getTime())) {
+    const bookingDateOnly = makeUtcDateFromIstParts({ ...ymd, hour: 0, minute: 0, second: 0, ms: 0 });
+
+    const [startHRaw, startMRaw] = String(startTime).split(":");
+    const [endHRaw, endMRaw] = String(endTime).split(":");
+    const startH = Number(startHRaw);
+    const startM = Number(startMRaw);
+    const endH = Number(endHRaw);
+    const endM = Number(endMRaw);
+    if ([startH, startM, endH, endM].some((n) => Number.isNaN(n))) {
       return res.status(400).json({ message: "Invalid start/end time" });
     }
+
+    const startDateTime = makeUtcDateFromIstParts({ ...ymd, hour: startH, minute: startM, second: 0, ms: 0 });
+    const endDateTime = makeUtcDateFromIstParts({ ...ymd, hour: endH, minute: endM, second: 0, ms: 0 });
+
     if (endDateTime <= startDateTime) {
       return res.status(400).json({ message: "End time must be after start time" });
     }
