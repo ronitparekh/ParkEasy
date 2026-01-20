@@ -72,8 +72,22 @@ export default function History() {
                             No bookings yet.
                         </p>
                     ) : (
-                        bookings.map((b) => (
-                            (() => {
+                        bookings
+                            .filter((b) => {
+                                if (!b) return false;
+
+                                // Hide temporary slot-holds and unpaid payment attempts.
+                                if (["PENDING_PAYMENT", "PAYMENT_FAILED"].includes(b.status)) return false;
+
+                                const paymentStatus = b?.payment?.status;
+                                if (paymentStatus && paymentStatus !== "PAID") return false;
+
+                                // Extra guard: hide holds that expired due to payment window.
+                                if (b.status === "EXPIRED" && b?.payment?.failureReason === "PAYMENT_WINDOW_EXPIRED") return false;
+
+                                return true;
+                            })
+                            .map((b) => {
                                 const parkingName =
                                     b?.parkingId?.name ||
                                     b?.parking?.name ||
@@ -87,10 +101,10 @@ export default function History() {
                                     !Number.isNaN(parkingLng);
 
                                 return (
-                            <div
-                                key={b._id}
-                                className="bg-[#0f172a] border border-white/10 rounded-2xl p-6 mb-6"
-                            >
+                                    <div
+                                        key={b._id}
+                                        className="bg-[#0f172a] border border-white/10 rounded-2xl p-6 mb-6"
+                                    >
                                 {/* HEADER */}
                                 <div className="flex flex-col sm:flex-row sm:justify-between sm:items-start gap-3">
                                     <div>
@@ -104,12 +118,20 @@ export default function History() {
 
                                     <span
                                         className={`px-3 py-1 rounded-full text-xs font-medium
-                    ${b.status === "ACTIVE"
-                                                ? "bg-green-500/20 text-green-400"
-                                                : b.status === "COMPLETED"
-                                                    ? "bg-blue-500/20 text-blue-400"
-                                                    : "bg-red-500/20 text-red-400"
-                                            }
+                    ${b.status === "UPCOMING"
+                                                ? "bg-blue-500/20 text-blue-400"
+                                                : b.status === "ACTIVE"
+                                                    ? "bg-green-500/20 text-green-400"
+                                                    : b.status === "CHECKED_IN"
+                                                        ? "bg-cyan-500/20 text-cyan-300"
+                                                        : b.status === "OVERSTAYED"
+                                                            ? "bg-amber-500/20 text-amber-300"
+                                                            : b.status === "COMPLETED"
+                                                                ? "bg-gray-500/20 text-gray-200"
+                                                                : b.status === "CANCELLED"
+                                                                    ? "bg-red-500/20 text-red-400"
+                                                                    : "bg-gray-500/20 text-gray-300"
+                                        }
                   `}
                                     >
                                         {b.status}
@@ -131,6 +153,19 @@ export default function History() {
                                     <p className="text-white font-semibold">
                                         Total Paid: ₹{b.totalPrice}
                                     </p>
+
+                                    {b.status === "CANCELLED" && Number(b.refundAmount || 0) > 0 ? (
+                                        <p className="text-amber-300 font-semibold">
+                                            Refund: ₹{Number(b.refundAmount || 0)}
+                                            {typeof b.refundPercent === "number" ? ` (${Math.round(b.refundPercent * 100)}%)` : ""}
+                                        </p>
+                                    ) : null}
+
+                                    {(Number(b.overstayFineDue || 0) > 0 || Number(b.overstayFine || 0) > 0) ? (
+                                        <p className="text-amber-300 font-semibold">
+                                            Overstay Fine: ₹{Number(b.overstayFineDue || b.overstayFine || 0)}
+                                        </p>
+                                    ) : null}
                                 </div>
 
                                 {/* ACTIONS */}
@@ -155,7 +190,7 @@ export default function History() {
                                         Receipt
                                     </button>
 
-                                    {b.status === "ACTIVE" && (
+                                    {(["UPCOMING", "ACTIVE"].includes(b.status)) && (
                                         <button
                                             onClick={() => cancelBooking(b._id)}
                                             className="px-4 py-2 bg-red-500/20 text-red-400 rounded-xl hover:bg-red-500/30"
@@ -166,8 +201,7 @@ export default function History() {
                                 </div>
                             </div>
                                 );
-                            })()
-                        ))
+                            })
                     )}
                 </div>
             </div>

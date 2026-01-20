@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { Link } from "react-router-dom";
 import api from "../../api/api";
 import ParkingMap from "../../components/ParkingMap";
 import OwnerNavbar from "../../components/OwnerNavbar";
@@ -106,10 +107,19 @@ export default function OwnerDashboard() {
           </p>
 
           {/* STATS */}
-          <div className="grid md:grid-cols-3 gap-6 mb-10">
+          <div className="grid md:grid-cols-3 gap-6 mb-6">
             <Stat title="Total Parkings" value={stats.totalParkings} />
             <Stat title="Active Bookings" value={stats.activeBookings} />
-            <Stat title="Total Earnings" value={`₹${stats.totalEarnings}`} />
+            <Stat title="Net Earnings" value={`₹${stats.totalEarnings ?? 0}`} />
+          </div>
+
+          <div className="mb-10 flex">
+            <Link
+              to="/owner/analytics"
+              className="border border-white/20 rounded-xl px-4 py-2 hover:bg-white/5"
+            >
+              Advanced analytics
+            </Link>
           </div>
 
           {/* MAP ONLY */}

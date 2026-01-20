@@ -136,9 +136,13 @@ export async function downloadReceipt(booking) {
   doc.text("PAYMENT SUMMARY", 35, y + 30);
 
   const statusColor =
-    booking.status === "ACTIVE"
+    booking.status === "UPCOMING" || booking.status === "ACTIVE" || booking.status === "CHECKED_IN"
       ? [20, 200, 140]
-      : [255, 90, 90];
+      : booking.status === "OVERSTAYED"
+        ? [255, 170, 40]
+        : booking.status === "COMPLETED"
+          ? [140, 170, 255]
+          : [255, 90, 90];
 
   doc.setFillColor(...statusColor);
   doc.roundedRect(pageWidth - 95, y + 24, 55, 16, 8, 8, "F");

@@ -49,6 +49,29 @@ export default function OwnerBookings() {
         return [dateStr, timeStr].filter(Boolean).join(" • ");
     }
 
+    function statusClass(status) {
+        switch (status) {
+            case "UPCOMING":
+                return "text-blue-400";
+            case "ACTIVE":
+                return "text-green-400";
+            case "CHECKED_IN":
+                return "text-cyan-300";
+            case "OVERSTAYED":
+                return "text-amber-300";
+            case "COMPLETED":
+                return "text-gray-200";
+            case "CANCELLED":
+                return "text-red-400";
+            case "EXPIRED":
+            case "PAYMENT_FAILED":
+            case "PENDING_PAYMENT":
+                return "text-gray-400";
+            default:
+                return "text-gray-300";
+        }
+    }
+
     return (
         <>
             <OwnerNavbar />
@@ -65,7 +88,16 @@ export default function OwnerBookings() {
                     ) : null}
 
                     <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-6">
-                        {bookings.map((b) => (
+                        {bookings
+                            .filter((b) => {
+                                if (!b) return false;
+                                if (["PENDING_PAYMENT", "PAYMENT_FAILED"].includes(b.status)) return false;
+                                const paymentStatus = b?.payment?.status;
+                                if (paymentStatus && paymentStatus !== "PAID") return false;
+                                if (b.status === "EXPIRED" && b?.payment?.failureReason === "PAYMENT_WINDOW_EXPIRED") return false;
+                                return true;
+                            })
+                            .map((b) => (
                             <div
                                 key={b._id ?? b.id}
                                 className="bg-[#0f172a] border border-white/10 p-5 rounded-2xl"
@@ -86,6 +118,12 @@ export default function OwnerBookings() {
                                     Gate: {b.gateStatus || "PENDING_ENTRY"}
                                 </p>
 
+                                {(Number(b.overstayFineDue || 0) > 0 || Number(b.overstayFine || 0) > 0) ? (
+                                    <p className="text-sm text-amber-300 mt-1">
+                                        Overstay fine: ₹{Number(b.overstayFineDue || b.overstayFine || 0)}
+                                    </p>
+                                ) : null}
+
                                 {b.checkedInAt ? (
                                     <p className="text-xs text-gray-600 mt-1">
                                         In: {new Date(b.checkedInAt).toLocaleTimeString()}
@@ -102,14 +140,17 @@ export default function OwnerBookings() {
                                     {formatWhen(b) || ""}
                                 </p>
 
+                                {b.status === "CANCELLED" && Number(b.refundAmount || 0) > 0 ? (
+                                    <p className="text-sm text-amber-300 mt-1">
+                                        Refunded: ₹{Number(b.refundAmount || 0)}
+                                        {typeof b.refundPercent === "number" ? ` (${Math.round(b.refundPercent * 100)}%)` : ""}
+                                    </p>
+                                ) : null}
+
                                 <div className="mt-3 flex items-center justify-between">
                                     <p className="font-bold">₹{b.totalPrice ?? b.total ?? 0}</p>
                                     <span className={
-                                        b.status === "ACTIVE"
-                                            ? "text-green-400"
-                                            : b.status === "CANCELLED"
-                                                ? "text-red-400"
-                                                : "text-gray-300"
+                                        statusClass(b.status)
                                     }>
                                         {b.status}
                                     </span>

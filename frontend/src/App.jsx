@@ -17,6 +17,7 @@ import OwnerParkings from "./pages/owner/Parkings";
 import AddParking from "./pages/owner/AddParking";
 import OwnerBookings from "./pages/owner/Bookings";
 import GateScan from "./pages/owner/GateScan";
+import AdvancedAnalytics from "./pages/owner/AdvancedAnalytics";
 
 // Context & protection
 import ProtectedRoute from "./components/ProtectedRoute";
@@ -110,6 +111,15 @@ export default function App() {
               element={
                 <ProtectedRoute role="OWNER">
                   <GateScan />
+                </ProtectedRoute>
+              }
+            />
+
+            <Route
+              path="/owner/analytics"
+              element={
+                <ProtectedRoute role="OWNER">
+                  <AdvancedAnalytics />
                 </ProtectedRoute>
               }
             />

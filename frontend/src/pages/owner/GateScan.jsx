@@ -520,6 +520,12 @@ export default function GateScan() {
                 <p><span className="text-gray-400">Plate:</span> {result.booking.vehicleNumber}</p>
                 <p><span className="text-gray-400">Gate:</span> {result.booking.gateStatus}</p>
                 <p><span className="text-gray-400">Status:</span> {result.booking.status}</p>
+                {(Number(result.booking.overstayFineDue || 0) > 0 || Number(result.booking.overstayFine || 0) > 0) ? (
+                  <p className="sm:col-span-2">
+                    <span className="text-amber-300 font-semibold">Overstay fine:</span>{" "}
+                    ₹{Number(result.booking.overstayFineDue || result.booking.overstayFine || 0)}
+                  </p>
+                ) : null}
               </div>
             </div>
           ) : null}

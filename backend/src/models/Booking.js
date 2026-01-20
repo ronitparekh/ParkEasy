@@ -34,6 +34,18 @@ const bookingSchema = new mongoose.Schema(
       type: Date,
     },
 
+    overstayMinutes: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+
+    overstayFine: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+
     entryMethod: {
       type: String,
       enum: ["PLATE_OCR", "QR", "MANUAL"],
@@ -92,6 +104,23 @@ const bookingSchema = new mongoose.Schema(
       required: true,
     },
 
+    cancelledAt: {
+      type: Date,
+    },
+
+    refundPercent: {
+      type: Number,
+      default: 0,
+      min: 0,
+      max: 1,
+    },
+
+    refundAmount: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+
     holdExpiresAt: {
       type: Date,
     },
@@ -140,13 +169,16 @@ const bookingSchema = new mongoose.Schema(
       type: String,
       enum: [
         "PENDING_PAYMENT",
+        "UPCOMING",
         "ACTIVE",
+        "CHECKED_IN",
+        "OVERSTAYED",
         "COMPLETED",
         "CANCELLED",
         "EXPIRED",
         "PAYMENT_FAILED",
       ],
-      default: "ACTIVE",
+      default: "UPCOMING",
     },
   },
   { timestamps: true }

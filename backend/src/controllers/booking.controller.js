@@ -40,11 +40,11 @@ async function assertOwnerOwnsParking(req, res, parkingId) {
   return parking;
 }
 
-async function findTodaysActiveBookingByPlate({ parkingId, plate }) {
+async function findTodaysBookingByPlate({ parkingId, plate, statuses }) {
   const { start, end, now } = getTodayRange();
   const candidates = await Booking.find({
     parkingId,
-    status: "ACTIVE",
+    status: { $in: statuses },
     bookingDate: { $gte: start, $lt: end },
   }).sort({ createdAt: -1 });
 
@@ -65,6 +65,44 @@ function bumpSlotsOnCheckout(parking) {
   if (parking.totalSlots !== undefined && parking.totalSlots !== null) {
     parking.availableSlots = Math.min(parking.availableSlots, Number(parking.totalSlots));
   }
+}
+
+function computeOverstayFine({ booking, now }) {
+  const { end } = getBookingStartEnd(booking);
+  if (!end) return { overstayMinutes: 0, overstayFine: 0 };
+
+  const exitGraceMs = 5 * 60 * 1000;
+  const billableMs = Math.max(0, now.getTime() - (end.getTime() + exitGraceMs));
+  if (billableMs <= 0) return { overstayMinutes: 0, overstayFine: 0 };
+
+  const billableMinutes = Math.ceil(billableMs / (60 * 1000));
+  const units15 = Math.ceil(billableMs / (15 * 60 * 1000));
+  const fine = units15 * 10; // ₹10 per 15 minutes
+
+  return { overstayMinutes: billableMinutes, overstayFine: fine };
+}
+
+function addLiveOverstayFields(bookingDoc, now) {
+  const booking = bookingDoc?.toObject ? bookingDoc.toObject() : bookingDoc;
+  if (!booking) return booking;
+
+  const gate = booking.gateStatus ?? "PENDING_ENTRY";
+  if (gate === "CHECKED_OUT" || booking.status === "COMPLETED") {
+    booking.overstayMinutesDue = 0;
+    booking.overstayFineDue = 0;
+    return booking;
+  }
+
+  if (!["CHECKED_IN", "OVERSTAYED"].includes(booking.status)) {
+    booking.overstayMinutesDue = 0;
+    booking.overstayFineDue = 0;
+    return booking;
+  }
+
+  const { overstayMinutes, overstayFine } = computeOverstayFine({ booking, now });
+  booking.overstayMinutesDue = overstayMinutes;
+  booking.overstayFineDue = overstayFine;
+  return booking;
 }
 
 // =========================
@@ -152,6 +190,16 @@ export const createBooking = async (req, res) => {
 
     const user = await User.findById(userId).select("name email phone");
 
+    const now = new Date();
+    const initialStatus = now < startDateTime ? "UPCOMING" : now < endDateTime ? "ACTIVE" : "EXPIRED";
+
+    if (initialStatus === "EXPIRED") {
+      // Do not allow creating a booking for a past time window.
+      bumpSlotsOnCheckout(parking);
+      await parking.save();
+      return res.status(400).json({ message: "Booking time has already passed" });
+    }
+
     const booking = await Booking.create({
       userId,
       parkingId,
@@ -165,7 +213,7 @@ export const createBooking = async (req, res) => {
       endTime,
       duration,
       totalPrice,
-      status: "ACTIVE",
+      status: initialStatus,
     });
 
     res.status(201).json(booking);
@@ -186,7 +234,8 @@ export const getMyBookings = async (req, res) => {
       .populate("parkingId", "name lat lng")
       .sort({ createdAt: -1 });
 
-    res.json(bookings);
+    const now = new Date();
+    res.json((bookings || []).map((b) => addLiveOverstayFields(b, now)));
   } catch (err) {
     console.error(err);
     res.status(500).json({ message: "Failed to fetch bookings" });
@@ -208,13 +257,23 @@ export const getOwnerBookings = async (req, res) => {
     const parkingIds = ownerParkings.map((p) => p._id);
 
     const { parkingId } = req.query;
-    let match = { parkingId: { $in: parkingIds } };
+    // Owners shouldn't see temporary slot-hold records (PENDING_PAYMENT) or unpaid holds.
+    // Only show bookings that are actually paid (or legacy bookings without a payment record).
+    let match = {
+      parkingId: { $in: parkingIds },
+      status: { $ne: "PENDING_PAYMENT" },
+      $or: [{ "payment.status": "PAID" }, { payment: { $exists: false } }],
+    };
     if (parkingId) {
       const found = parkingIds.some((id) => id.toString() === String(parkingId));
       if (!found) {
         return res.status(403).json({ message: "Access denied" });
       }
-      match = { parkingId };
+      match = {
+        parkingId,
+        status: { $ne: "PENDING_PAYMENT" },
+        $or: [{ "payment.status": "PAID" }, { payment: { $exists: false } }],
+      };
     }
 
     const bookings = await Booking.find(match)
@@ -222,7 +281,8 @@ export const getOwnerBookings = async (req, res) => {
       .populate("userId", "email")
       .sort({ createdAt: -1 });
 
-    res.json(bookings);
+    const now = new Date();
+    res.json((bookings || []).map((b) => addLiveOverstayFields(b, now)));
   } catch (err) {
     console.error(err);
     res.status(500).json({ message: "Failed to fetch owner bookings" });
@@ -246,23 +306,59 @@ export const cancelBooking = async (req, res) => {
       return res.status(403).json({ message: "Not allowed" });
     }
 
-    if (booking.status !== "ACTIVE") {
+    if (!['UPCOMING', 'ACTIVE'].includes(booking.status) || (booking.gateStatus ?? "PENDING_ENTRY") !== "PENDING_ENTRY") {
       return res
         .status(400)
         .json({ message: "Booking cannot be cancelled" });
     }
 
+    const now = new Date();
+    const { start } = getBookingStartEnd(booking);
+
+    let refundPercent = 0;
+
+    // 100% refund only for instant cancellation right after PAYMENT succeeds.
+    if (
+      booking.payment?.status === "PAID" &&
+      booking.payment?.paidAt &&
+      now.getTime() - new Date(booking.payment.paidAt).getTime() <= 2 * 60 * 1000
+    ) {
+      refundPercent = 1;
+    } else if (start && now.getTime() < start.getTime()) {
+      // Otherwise, refund is based ONLY on time-to-start.
+      const msToStart = start.getTime() - now.getTime();
+      if (msToStart >= 60 * 60 * 1000) {
+        refundPercent = 0.75;
+      } else if (msToStart >= 30 * 60 * 1000) {
+        refundPercent = 0.5;
+      } else {
+        refundPercent = 0;
+      }
+    } else {
+      refundPercent = 0;
+    }
+
+    const totalPrice = Number(booking.totalPrice || 0);
+    const refundAmount = Math.max(0, Math.min(totalPrice, Math.round(totalPrice * refundPercent)));
+
     booking.status = "CANCELLED";
+    booking.cancelledAt = now;
+    booking.refundPercent = refundPercent;
+    booking.refundAmount = refundAmount;
     await booking.save();
 
     // 🔼 Restore parking slot
     const parking = await Parking.findById(booking.parkingId);
     if (parking) {
-      parking.availableSlots += 1;
+      bumpSlotsOnCheckout(parking);
       await parking.save();
     }
 
-    res.json({ message: "Booking cancelled" });
+    res.json({
+      message: "Booking cancelled",
+      refundPercent,
+      refundAmount,
+    });
   } catch (err) {
     console.error(err);
     res.status(500).json({ message: "Failed to cancel booking" });
@@ -284,9 +380,10 @@ export const ownerCheckInByPlate = async (req, res) => {
     const parking = await assertOwnerOwnsParking(req, res, parkingId);
     if (!parking) return;
 
-    const { booking, now, plateNorm } = await findTodaysActiveBookingByPlate({
+    const { booking, now, plateNorm } = await findTodaysBookingByPlate({
       parkingId,
       plate: plateNumber,
+      statuses: ["ACTIVE"],
     });
 
     if (!booking) {
@@ -314,6 +411,7 @@ export const ownerCheckInByPlate = async (req, res) => {
       booking.gateStatus = "CHECKED_IN";
       booking.checkedInAt = now;
       booking.entryMethod = "PLATE_OCR";
+      booking.status = "CHECKED_IN";
     }
 
     booking.lastPlateScan = {
@@ -343,9 +441,10 @@ export const ownerCheckOutByPlate = async (req, res) => {
     const parking = await assertOwnerOwnsParking(req, res, parkingId);
     if (!parking) return;
 
-    const { booking, now, plateNorm } = await findTodaysActiveBookingByPlate({
+    const { booking, now, plateNorm } = await findTodaysBookingByPlate({
       parkingId,
       plate: plateNumber,
+      statuses: ["CHECKED_IN", "OVERSTAYED"],
     });
 
     if (!booking) {
@@ -360,10 +459,14 @@ export const ownerCheckOutByPlate = async (req, res) => {
       return res.status(400).json({ message: "Booking already checked out" });
     }
 
+    const { overstayMinutes, overstayFine } = computeOverstayFine({ booking, now });
+
     booking.gateStatus = "CHECKED_OUT";
     booking.checkedOutAt = now;
     booking.exitMethod = "PLATE_OCR";
     booking.status = "COMPLETED";
+    booking.overstayMinutes = overstayMinutes;
+    booking.overstayFine = overstayFine;
     booking.lastPlateScan = {
       rawText: rawText ? String(rawText).slice(0, 200) : undefined,
       normalized: plateNorm,
@@ -433,6 +536,7 @@ export const ownerCheckInByBookingId = async (req, res) => {
       booking.gateStatus = "CHECKED_IN";
       booking.checkedInAt = new Date();
       booking.entryMethod = "QR";
+      booking.status = "CHECKED_IN";
       await booking.save();
     }
 
@@ -464,8 +568,8 @@ export const ownerCheckOutByBookingId = async (req, res) => {
       return res.status(403).json({ message: "Access denied" });
     }
 
-    if (booking.status !== "ACTIVE") {
-      return res.status(400).json({ message: "Booking is not active" });
+    if (!["CHECKED_IN", "OVERSTAYED"].includes(booking.status)) {
+      return res.status(400).json({ message: "Booking is not checked in" });
     }
 
     if (booking.gateStatus !== "CHECKED_IN") {
@@ -476,10 +580,15 @@ export const ownerCheckOutByBookingId = async (req, res) => {
       return res.status(400).json({ message: "Booking already checked out" });
     }
 
+    const now = new Date();
+    const { overstayMinutes, overstayFine } = computeOverstayFine({ booking, now });
+
     booking.gateStatus = "CHECKED_OUT";
-    booking.checkedOutAt = new Date();
+    booking.checkedOutAt = now;
     booking.exitMethod = "QR";
     booking.status = "COMPLETED";
+    booking.overstayMinutes = overstayMinutes;
+    booking.overstayFine = overstayFine;
     await booking.save();
 
     bumpSlotsOnCheckout(parking);

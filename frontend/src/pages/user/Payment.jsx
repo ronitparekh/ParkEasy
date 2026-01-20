@@ -70,6 +70,11 @@ export default function Payment() {
 
                 if (!alive) return;
 
+                if (orderRes.data?.alreadyPaid) {
+                    navigate("/user/history", { replace: true });
+                    return;
+                }
+
                 setKeyId(keyRes.data?.keyId || null);
                 setOrderId(orderRes.data?.orderId || null);
                 setBookingId(orderRes.data?.bookingId || null);
@@ -88,7 +93,7 @@ export default function Payment() {
         return () => {
             alive = false;
         };
-    }, [parkingId, state]);
+    }, [parkingId, state, navigate]);
 
     if (!state?.parking) {
         return (

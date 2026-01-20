@@ -175,38 +175,106 @@ export const getOwnerDashboard = async (req, res) => {
     const ownerId = new mongoose.Types.ObjectId(req.user.id);
 
     const parkings = await Parking.find({ ownerId });
-    const parkingIds = parkings.map(p => p._id);
+      const parkingIds = parkings.map(p => p._id);
+
+    const startOfDay = new Date();
+    startOfDay.setHours(0, 0, 0, 0);
 
     const stats = await Booking.aggregate([
-      { $match: { parkingId: { $in: parkingIds } } },
+      {
+        $match: {
+          parkingId: { $in: parkingIds },
+          $or: [
+            { "payment.status": "PAID" },
+            { payment: { $exists: false } }
+          ]
+        }
+      },
       {
         $group: {
           _id: null,
           totalBookings: { $sum: 1 },
           activeBookings: {
             $sum: {
-              $cond: [{ $eq: ["$status", "ACTIVE"] }, 1, 0]
+              $cond: [{ $in: ["$status", ["UPCOMING", "ACTIVE", "CHECKED_IN", "OVERSTAYED"]] }, 1, 0]
             }
           },
-          totalEarnings: { $sum: "$totalPrice" }
+          grossEarnings: {
+            $sum: {
+              $add: [{ $ifNull: ["$totalPrice", 0] }, { $ifNull: ["$overstayFine", 0] }]
+            }
+          },
+          totalRefunds: {
+            $sum: {
+              $cond: [
+                { $eq: ["$status", "CANCELLED"] },
+                { $ifNull: ["$refundAmount", 0] },
+                0
+              ]
+            }
+          }
         }
       }
     ]);
-
-    const startOfDay = new Date();
-    startOfDay.setHours(0, 0, 0, 0);
 
     const today = await Booking.aggregate([
       {
         $match: {
           parkingId: { $in: parkingIds },
-          createdAt: { $gte: startOfDay }
+          $or: [
+            { "payment.status": "PAID" },
+            { payment: { $exists: false } }
+          ]
         }
       },
       {
         $group: {
           _id: null,
-          todayEarnings: { $sum: "$totalPrice" }
+          paidToday: {
+            $sum: {
+              $cond: [
+                {
+                  $and: [
+                    {
+                      $gte: [
+                        { $ifNull: ["$payment.paidAt", "$createdAt"] },
+                        startOfDay
+                      ]
+                    }
+                  ]
+                },
+                { $ifNull: ["$totalPrice", 0] },
+                0
+              ]
+            }
+          },
+          overstayToday: {
+            $sum: {
+              $cond: [
+                { $gte: ["$checkedOutAt", startOfDay] },
+                { $ifNull: ["$overstayFine", 0] },
+                0
+              ]
+            }
+          },
+          refundsToday: {
+            $sum: {
+              $cond: [
+                { $gte: ["$cancelledAt", startOfDay] },
+                { $ifNull: ["$refundAmount", 0] },
+                0
+              ]
+            }
+          }
+        }
+      },
+      {
+        $project: {
+          _id: 0,
+          todayEarnings: { $subtract: [{ $add: ["$paidToday", "$overstayToday"] }, "$refundsToday"] },
+          paidToday: 1,
+          overstayToday: 1,
+          refundsToday: 1,
         }
       }
     ]);
@@ -215,8 +283,11 @@ export const getOwnerDashboard = async (req, res) => {
       totalParkings: parkings.length,
       totalBookings: stats[0]?.totalBookings || 0,
       activeBookings: stats[0]?.activeBookings || 0,
-      totalEarnings: stats[0]?.totalEarnings || 0,
-      todayEarnings: today[0]?.todayEarnings || 0
+      grossEarnings: stats[0]?.grossEarnings || 0,
+      totalRefunds: stats[0]?.totalRefunds || 0,
+      totalEarnings: (stats[0]?.grossEarnings || 0) - (stats[0]?.totalRefunds || 0),
+      todayEarnings: today[0]?.todayEarnings || 0,
+      refundsToday: today[0]?.refundsToday || 0
     });
 
   } catch (err) {

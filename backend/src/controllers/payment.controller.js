@@ -5,6 +5,7 @@ import Parking from "../models/Parking.js";
 import User from "../models/User.js";
 import {
   formatIstDateYmd,
+  getBookingStartEndIst,
   makeUtcDateFromIstParts,
   parseYmd,
 } from "../utils/ist.js";
@@ -58,7 +59,8 @@ export async function createRazorpayOrder(req, res) {
       customerPhone,
     } = req.body;
 
-    if (!parkingId || !vehicleNumber || !startTime || !endTime) {
+    const vehicleNumberClean = String(vehicleNumber ?? "").trim().toUpperCase();
+    if (!parkingId || !vehicleNumberClean || !startTime || !endTime) {
       return res.status(400).json({ message: "All fields are required" });
     }
 
@@ -90,6 +92,28 @@ export async function createRazorpayOrder(req, res) {
     const now = new Date();
     const holdExpiresAt = new Date(now.getTime() + 2 * 60 * 1000);
 
+    // If the user already successfully paid for the exact same slot details,
+    // do not create another PENDING_PAYMENT hold booking (this commonly happens
+    // if they revisit/refresh the payment page after success).
+    const alreadyPaid = await Booking.findOne({
+      userId,
+      parkingId,
+      bookingDate: bookingDateOnly,
+      startTime,
+      endTime,
+      vehicleNumber: vehicleNumberClean,
+      status: { $in: ["UPCOMING", "ACTIVE", "CHECKED_IN", "OVERSTAYED", "COMPLETED"] },
+      "payment.status": "PAID",
+    }).select("_id status");
+
+    if (alreadyPaid) {
+      return res.status(200).json({
+        alreadyPaid: true,
+        bookingId: alreadyPaid._id,
+        status: alreadyPaid.status,
+      });
+    }
+
     // Reuse an existing unexpired pending booking (prevents double-hold on refresh)
     const existing = await Booking.findOne({
       userId,
@@ -97,7 +121,7 @@ export async function createRazorpayOrder(req, res) {
       bookingDate: bookingDateOnly,
       startTime,
       endTime,
-      vehicleNumber,
+      vehicleNumber: vehicleNumberClean,
       status: "PENDING_PAYMENT",
       holdExpiresAt: { $gt: now },
     }).sort({ createdAt: -1 });
@@ -132,7 +156,7 @@ export async function createRazorpayOrder(req, res) {
     const booking = await Booking.create({
       userId,
       parkingId,
-      vehicleNumber,
+      vehicleNumber: vehicleNumberClean,
       customerName: String(customerName ?? user?.name ?? "").trim() || undefined,
       customerEmail: String(customerEmail ?? user?.email ?? "")
         .trim()
@@ -237,7 +261,29 @@ export async function verifyRazorpayPayment(req, res) {
       return res.status(400).json({ message: "Invalid payment signature" });
     }
 
-    booking.status = "ACTIVE";
+    const now = new Date();
+    const { start, end } = getBookingStartEndIst(booking);
+    const nextStatus = start && end ? (now < start ? "UPCOMING" : now < end ? "ACTIVE" : "EXPIRED") : "ACTIVE";
+
+    if (nextStatus === "EXPIRED") {
+      booking.status = "EXPIRED";
+      booking.payment = {
+        ...(booking.payment || {}),
+        provider: "RAZORPAY",
+        orderId: razorpay_order_id,
+        paymentId: razorpay_payment_id,
+        signature: razorpay_signature,
+        status: "FAILED",
+        failedAt: now,
+        failureReason: "BOOKING_WINDOW_PASSED",
+      };
+      await booking.save();
+
+      await Parking.findByIdAndUpdate(booking.parkingId, { $inc: { availableSlots: 1 } });
+      return res.status(400).json({ message: "Booking time has already passed" });
+    }
+
+    booking.status = nextStatus;
     booking.payment = {
       ...(booking.payment || {}),
       provider: "RAZORPAY",
@@ -245,8 +291,9 @@ export async function verifyRazorpayPayment(req, res) {
       paymentId: razorpay_payment_id,
       signature: razorpay_signature,
       status: "PAID",
-      paidAt: new Date(),
+      paidAt: now,
     };
+    booking.holdExpiresAt = undefined;
 
     await booking.save();
 
