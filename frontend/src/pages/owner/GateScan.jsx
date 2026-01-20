@@ -594,7 +594,7 @@ export default function GateScan() {
                 <input
                   value={plateText}
                   onChange={(e) => setPlateText(e.target.value)}
-                  placeholder="e.g. MH12AB1234"
+                  placeholder="e.g. GJ12AB1234"
                   className="mt-2 w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3"
                 />
                 <p className="text-xs text-gray-500 mt-2">
@@ -641,7 +641,7 @@ export default function GateScan() {
                 <input
                   value={bookingId}
                   onChange={(e) => setBookingId(e.target.value)}
-                  placeholder="Paste booking _id"
+                  placeholder="Paste Booking ID"
                   className="mt-2 w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3"
                 />
               </div>
