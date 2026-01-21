@@ -16,7 +16,7 @@ export default function UserNavbar() {
       <div className="mx-auto w-full max-w-6xl px-4 sm:px-6 py-4">
         <div className="flex items-center justify-between gap-3">
           <Link to="/user/dashboard" className="text-xl font-bold text-white">
-            Park-Easy
+            ParkEasy
           </Link>
 
           <button

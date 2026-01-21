@@ -4,14 +4,14 @@ export default function Landing() {
   return (
     <div className="min-h-screen bg-linear-to-br from-[#0b0b0f] via-[#111827] to-black text-white">
       <div className="mx-auto w-full max-w-6xl px-4 py-10 sm:px-6">
-        <header className="flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="h-10 w-10 rounded-2xl bg-white/10 ring-1 ring-white/15" />
-            <div>
-              <p className="text-sm font-semibold tracking-tight">Park-Easy</p>
-              <p className="text-xs text-white/60">Smart parking, made simple</p>
-            </div>
-          </div>
+        <header className="flex items-center justify-between py-2">
+          <Link to="/" className="relative inline-flex shrink-0 items-center overflow-visible">
+            <img
+              src="/Logo.png"
+              alt="Park-Easy"
+              className="h-12 w-auto origin-left scale-[3.50] -translate-x-20 -translate-y-1 sm:-translate-x-16 md:-translate-x-25 sm:h-14 md:h-16 lg:h-20"
+            />
+          </Link>
 
           <Link
             to="/auth"
@@ -128,3 +128,4 @@ export default function Landing() {
     </div>
   );
 }
+  
