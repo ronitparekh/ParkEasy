@@ -20,14 +20,18 @@ export default function UserDashboard() {
   const [parkings, setParkings] = useState([]);
   const [loading, setLoading] = useState(false);
 
-  // =========================
-  // SAFE MAP ZOOM HELPER
-  // =========================
+  // ✅ SELECTED PARKING (MAP ↔ CARD SYNC)
+  const [selectedParkingId, setSelectedParkingId] = useState(null);
+
+  // ✅ store refs of each parking card for scroll
+  const cardRefs = useRef({});
+
+  // ✅ store refs of marker instances for popup open
+  const markerRefs = useRef({});
+
   function zoomTo(lat, lng, zoom = 14) {
     if (mapRef.current) {
-      mapRef.current.setView([lat, lng], zoom, {
-        animate: true,
-      });
+      mapRef.current.setView([lat, lng], zoom, { animate: true });
     }
   }
 
@@ -60,16 +64,12 @@ export default function UserDashboard() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // When we first get userLocation, recenter the map reliably.
   useEffect(() => {
     if (userLocation) {
       zoomTo(userLocation.lat, userLocation.lng, 14);
     }
   }, [userLocation]);
 
-  // =========================
-  // FETCH PARKINGS (CORE)
-  // =========================
   async function fetchParkings({
     lat,
     lng,
@@ -82,8 +82,8 @@ export default function UserDashboard() {
       setLoading(true);
 
       const params = {};
-
       if (search) params.search = search;
+
       if (useDistance && lat && lng) {
         params.lat = lat;
         params.lng = lng;
@@ -93,15 +93,9 @@ export default function UserDashboard() {
       const res = await api.get("/parking/nearby", { params });
       setParkings(res.data);
 
-      if (
-        zoomAfter &&
-        !useDistance &&
-        res.data.length > 0
-      ) {
-        zoomTo(res.data[0].lat, res.data[0].lng, 12);
-      }
+      // reset selection when new data loads
+      setSelectedParkingId(null);
 
-      // Default nearby zoom
       if (zoomAfter && useDistance && lat && lng) {
         zoomTo(lat, lng, 14);
       }
@@ -112,9 +106,6 @@ export default function UserDashboard() {
     }
   }
 
-  // =========================
-  // SEARCH BUTTON
-  // =========================
   function handleSearch() {
     fetchParkings({
       lat: userLocation?.lat,
@@ -126,9 +117,6 @@ export default function UserDashboard() {
     });
   }
 
-  // =========================
-  // USE MY LOCATION (RESET)
-  // =========================
   function handleUseMyLocation() {
     if (!userLocation) return;
 
@@ -148,6 +136,32 @@ export default function UserDashboard() {
     zoomTo(userLocation.lat, userLocation.lng, 14);
   }
 
+  // ✅ MARKER CLICK → highlight + scroll to card
+  function handleMarkerSelect(parking) {
+    setSelectedParkingId(parking._id);
+
+    const el = cardRefs.current[parking._id];
+    if (el) {
+      el.scrollIntoView({ behavior: "smooth", block: "center" });
+    }
+  }
+
+  // ✅ CARD CLICK → highlight + zoom to marker + open popup
+  function handleCardSelect(parking) {
+    setSelectedParkingId(parking._id);
+
+    if (mapRef.current) {
+      mapRef.current.setView([parking.lat, parking.lng], 16, {
+        animate: true,
+      });
+    }
+
+    // open popup of marker
+    setTimeout(() => {
+      markerRefs.current[parking._id]?.openPopup?.();
+    }, 150);
+  }
+
   return (
     <>
       <UserNavbar />
@@ -161,26 +175,13 @@ export default function UserDashboard() {
           {/* SEARCH PANEL */}
           <div className="bg-[#0f172a] border border-white/10 rounded-2xl p-6 mb-8">
             <div className="grid md:grid-cols-3 gap-4">
-              <SearchBar
-                value={searchText}
-                onChange={setSearchText}
-              />
+              <SearchBar value={searchText} onChange={setSearchText} />
 
               <select
                 value={distance}
-                onChange={(e) =>
-                  setDistance(Number(e.target.value))
-                }
+                onChange={(e) => setDistance(Number(e.target.value))}
                 disabled={!useDistanceFilter}
-                className="
-                  w-full
-                  bg-black/40
-                  border border-white/10
-                  rounded-xl
-                  px-4 py-3
-                  text-white
-                  disabled:opacity-50
-                "
+                className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-white disabled:opacity-50"
               >
                 <option value={1}>Within 1 km</option>
                 <option value={3}>Within 3 km</option>
@@ -190,14 +191,7 @@ export default function UserDashboard() {
 
               <button
                 onClick={handleSearch}
-                className="
-                  w-full
-                  bg-white text-black
-                  rounded-xl
-                  px-6 py-3
-                  font-medium
-                  hover:bg-gray-200
-                "
+                className="w-full bg-white text-black rounded-xl px-6 py-3 font-medium hover:bg-gray-200"
               >
                 Search
               </button>
@@ -208,9 +202,7 @@ export default function UserDashboard() {
                 <input
                   type="checkbox"
                   checked={useDistanceFilter}
-                  onChange={(e) =>
-                    setUseDistanceFilter(e.target.checked)
-                  }
+                  onChange={(e) => setUseDistanceFilter(e.target.checked)}
                 />
                 Filter by distance
               </label>
@@ -230,6 +222,9 @@ export default function UserDashboard() {
               mapRef={mapRef}
               userLocation={userLocation}
               parkings={parkings}
+              selectedParkingId={selectedParkingId}
+              onMarkerSelect={handleMarkerSelect}
+              markerRefs={markerRefs}
             />
           </div>
 
@@ -237,16 +232,22 @@ export default function UserDashboard() {
           {loading ? (
             <p className="text-gray-400">Loading parkings...</p>
           ) : parkings.length === 0 ? (
-            <p className="text-gray-400">
-              No parking spots found.
-            </p>
+            <p className="text-gray-400">No parking spots found.</p>
           ) : (
             <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-6">
               {parkings.map((p) => (
-                <ParkingCard
+                <div
                   key={p._id}
-                  parking={p}
-                />
+                  ref={(el) => {
+                    if (el) cardRefs.current[p._id] = el;
+                  }}
+                >
+                  <ParkingCard
+                    parking={p}
+                    selected={selectedParkingId === p._id}
+                    onSelect={() => handleCardSelect(p)}
+                  />
+                </div>
               ))}
             </div>
           )}
@@ -255,4 +256,3 @@ export default function UserDashboard() {
     </>
   );
 }
-  
