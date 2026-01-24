@@ -2,7 +2,6 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import OwnerNavbar from "../../components/OwnerNavbar";
 import api from "../../api/api";
-import Tesseract from "tesseract.js";
 
 function normalizePlate(value) {
   return String(value ?? "")
@@ -15,7 +14,6 @@ function scorePlateCandidate(token) {
   const s = normalizePlate(token);
   if (!s) return { plate: "", score: -1 };
 
-  // Typical plates are ~7-12 chars; keep it flexible.
   const len = s.length;
   if (len < 6 || len > 14) return { plate: s, score: 0 };
 
@@ -26,51 +24,13 @@ function scorePlateCandidate(token) {
   if (hasLetters && hasDigits) score += 20;
   if (!hasLetters || !hasDigits) score -= 10;
 
-  // Penalize suspicious runs (often OCR noise)
   if (/(.)\1\1/.test(s)) score -= 5;
   if (/^\d+$/.test(s) || /^[A-Z]+$/.test(s)) score -= 5;
 
-  // Prefer common-ish Indian-style structure (loose): letters+digits mix
   if (/^[A-Z]{2}\d{1,2}[A-Z]{1,3}\d{3,4}$/.test(s)) score += 15;
 
-  // Prefer 8-11 chars mildly
   score -= Math.abs(10 - len);
-
   return { plate: s, score };
-}
-
-function extractBestPlateFromText(rawText) {
-  const text = String(rawText ?? "");
-
-  // Pull candidates from OCR output: alnum sequences.
-  const tokens = text
-    .toUpperCase()
-    .replace(/[^A-Z0-9\s]/g, " ")
-    .split(/\s+/)
-    .filter(Boolean);
-
-  let best = { plate: "", score: -1 };
-  for (const tok of tokens) {
-    const cand = scorePlateCandidate(tok);
-    if (cand.score > best.score) best = cand;
-  }
-
-  // Also try within a fully-normalized stream (handles OCR spacing issues).
-  const normalizedStream = normalizePlate(text);
-  if (normalizedStream.length >= 6) {
-    // Take sliding windows to find best-looking substring.
-    const minLen = 6;
-    const maxLen = Math.min(14, normalizedStream.length);
-    for (let len = minLen; len <= maxLen; len += 1) {
-      for (let i = 0; i + len <= normalizedStream.length; i += 1) {
-        const sub = normalizedStream.slice(i, i + len);
-        const cand = scorePlateCandidate(sub);
-        if (cand.score > best.score) best = cand;
-      }
-    }
-  }
-
-  return best.plate;
 }
 
 async function loadImage(dataUrl) {
@@ -82,15 +42,21 @@ async function loadImage(dataUrl) {
   });
 }
 
-function canvasToDataUrl(canvas) {
-  return canvas.toDataURL("image/png");
+function canvasToDataUrl(canvas, format = "image/jpeg", quality = 0.92) {
+  return canvas.toDataURL(format, quality);
 }
 
-function preprocessVariants(img) {
+/**
+ * Build image variants for better plate recognition hit rate
+ * Sends these to backend which calls PlateRecogniser API
+ */
+async function buildCaptureVariants(dataUrl) {
+  const img = await loadImage(dataUrl);
+
   const variants = [];
 
-  // Use a reasonable max size for speed on mobile.
-  const maxW = 1400;
+  // Scale down for upload speed but keep enough detail
+  const maxW = 1600;
   const scale = Math.min(1, maxW / (img.naturalWidth || img.width || maxW));
   const w = Math.max(1, Math.round((img.naturalWidth || img.width) * scale));
   const h = Math.max(1, Math.round((img.naturalHeight || img.height) * scale));
@@ -102,11 +68,11 @@ function preprocessVariants(img) {
   baseCtx.drawImage(img, 0, 0, w, h);
   variants.push({ name: "full", dataUrl: canvasToDataUrl(baseCanvas) });
 
-  // Crops that often help: center strip, and lower-center strip.
+  // Crops that likely contain plate
   const crops = [
-    { name: "center", x: 0.10, y: 0.35, ww: 0.80, hh: 0.35 },
-    { name: "lower", x: 0.10, y: 0.50, ww: 0.80, hh: 0.40 },
-    { name: "tight", x: 0.15, y: 0.45, ww: 0.70, hh: 0.30 },
+    { name: "center", x: 0.05, y: 0.30, ww: 0.90, hh: 0.45 },
+    { name: "lower", x: 0.05, y: 0.45, ww: 0.90, hh: 0.50 },
+    { name: "tight", x: 0.12, y: 0.42, ww: 0.76, hh: 0.35 },
   ];
 
   for (const c of crops) {
@@ -120,30 +86,29 @@ function preprocessVariants(img) {
     cropCanvas.height = ch;
     const cropCtx = cropCanvas.getContext("2d", { willReadFrequently: true });
     cropCtx.drawImage(baseCanvas, cx, cy, cw, ch, 0, 0, cw, ch);
+
     variants.push({ name: c.name, dataUrl: canvasToDataUrl(cropCanvas) });
 
-    // Preprocess crop: grayscale + contrast + threshold
+    // Enhanced variant: contrast + brightness boost
     const imgData = cropCtx.getImageData(0, 0, cw, ch);
     const data = imgData.data;
 
-    // Simple contrast stretch + threshold.
     for (let i = 0; i < data.length; i += 4) {
       const r = data[i];
       const g = data[i + 1];
       const b = data[i + 2];
-      // Luma
+
       let y = 0.2126 * r + 0.7152 * g + 0.0722 * b;
-      // Boost contrast (centered)
-      y = (y - 128) * 1.35 + 128;
-      // Threshold
-      const v = y > 150 ? 255 : 0;
-      data[i] = v;
-      data[i + 1] = v;
-      data[i + 2] = v;
+      y = (y - 128) * 1.3 + 128;
+      y = Math.max(0, Math.min(255, y));
+
+      data[i] = y;
+      data[i + 1] = y;
+      data[i + 2] = y;
       data[i + 3] = 255;
     }
     cropCtx.putImageData(imgData, 0, 0);
-    variants.push({ name: `${c.name}-bw`, dataUrl: canvasToDataUrl(cropCanvas) });
+    variants.push({ name: `${c.name}-enh`, dataUrl: canvasToDataUrl(cropCanvas) });
   }
 
   return variants;
@@ -153,15 +118,15 @@ export default function GateScan() {
   const [params] = useSearchParams();
   const parkingId = params.get("parkingId") || "";
 
-  const [mode, setMode] = useState("ENTRY"); // ENTRY | EXIT
+  const [mode, setMode] = useState("ENTRY");
   const [cameraOn, setCameraOn] = useState(false);
   const [videoError, setVideoError] = useState("");
 
   const [capturedDataUrl, setCapturedDataUrl] = useState("");
   const [plateText, setPlateText] = useState("");
-  const [ocrBusy, setOcrBusy] = useState(false);
-  const [ocrProgress, setOcrProgress] = useState(0);
-  const [ocrHint, setOcrHint] = useState("");
+  const [plateRecognitionBusy, setPlateRecognitionBusy] = useState(false);
+  const [plateRecognitionHint, setPlateRecognitionHint] = useState("");
+  const [plateRecognitionConfidence, setPlateRecognitionConfidence] = useState(null);
   const [apiBusy, setApiBusy] = useState(false);
   const [result, setResult] = useState(null);
   const [error, setError] = useState("");
@@ -172,7 +137,6 @@ export default function GateScan() {
   const videoRef = useRef(null);
   const streamRef = useRef(null);
   const scanLoopRef = useRef({ running: false, rafId: null });
-  const ocrWorkerRef = useRef(null);
 
   const plateNormalized = useMemo(() => normalizePlate(plateText), [plateText]);
 
@@ -180,40 +144,9 @@ export default function GateScan() {
     return () => {
       stopCamera();
       stopQrScan();
-      // Terminate OCR worker to free memory on mobile.
-      if (ocrWorkerRef.current) {
-        try {
-          ocrWorkerRef.current.terminate();
-        } catch {
-          // ignore
-        }
-      }
-      ocrWorkerRef.current = null;
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-
-  async function getOcrWorker() {
-    if (ocrWorkerRef.current) return ocrWorkerRef.current;
-
-    // Tesseract.js v5: createWorker is available via Tesseract
-    const worker = await Tesseract.createWorker("eng", 1, {
-      logger: (m) => {
-        if (m?.status === "recognizing text" && typeof m.progress === "number") {
-          setOcrProgress(m.progress);
-        }
-      },
-    });
-
-    // OCR tuning for license plates
-    await worker.setParameters({
-      tessedit_char_whitelist: "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789",
-      preserve_interword_spaces: "1",
-      // PSM 7 = single text line; 6 = single block; we’ll try both via re-init calls.
-    });
-
-    ocrWorkerRef.current = worker;
-    return worker;
-  }
 
   async function startCamera() {
     try {
@@ -233,7 +166,6 @@ export default function GateScan() {
         audio: false,
       });
 
-      // Try enabling continuous autofocus on supported devices.
       try {
         const [track] = stream.getVideoTracks();
         if (track?.applyConstraints) {
@@ -242,7 +174,7 @@ export default function GateScan() {
           });
         }
       } catch {
-        // ignore if unsupported
+        // ignore
       }
 
       streamRef.current = stream;
@@ -270,8 +202,10 @@ export default function GateScan() {
 
   function captureFrame() {
     setError("");
+    setResult(null);
+
     const video = videoRef.current;
-    if (!video) return;
+    if (!video) return "";
 
     const canvas = document.createElement("canvas");
     const width = video.videoWidth || 1280;
@@ -282,74 +216,89 @@ export default function GateScan() {
     const ctx = canvas.getContext("2d");
     ctx.drawImage(video, 0, 0, width, height);
 
-    const dataUrl = canvas.toDataURL("image/jpeg", 0.9);
+    const dataUrl = canvas.toDataURL("image/jpeg", 0.92);
     setCapturedDataUrl(dataUrl);
+
+    setPlateRecognitionConfidence(null);
+    setPlateRecognitionHint("");
     return dataUrl;
   }
 
-  async function runOcr() {
+  /**
+   * ✅ PlateRecogniser API Integration
+   * - Creates 7 image variants (full + crops + enhanced crops)
+   * - Calls backend /anpr/scan which uses PlateRecogniser API
+   * - Selects best plate based on confidence & heuristic score
+   */
+  async function runPlateRecognition() {
     try {
       setError("");
       setResult(null);
-      setOcrHint("");
+      setPlateRecognitionHint("");
+      setPlateRecognitionConfidence(null);
 
       const dataUrl = capturedDataUrl || captureFrame();
-      if (!dataUrl) {
-        throw new Error("Capture a frame first");
-      }
+      if (!dataUrl) throw new Error("Capture a frame first");
 
-      setOcrBusy(true);
-      setOcrProgress(0);
+      setPlateRecognitionBusy(true);
+      setPlateRecognitionHint("Preparing image…");
 
-      const img = await loadImage(dataUrl);
-      const variants = preprocessVariants(img);
-      const worker = await getOcrWorker();
+      const variants = await buildCaptureVariants(dataUrl);
 
-      // Run multiple OCR passes; pick best plate-like token.
-      let best = { plate: "", score: -1, source: "" };
-      const psmModes = ["7", "6"]; // line, then block
+      let best = { plate: "", combined: -1, conf: 0, source: "" };
 
-      for (const { name, dataUrl: vUrl } of variants) {
-        for (const psm of psmModes) {
-          setOcrHint(`Scanning ${name} (psm ${psm})…`);
-          // Note: setParameters is cheap vs re-creating worker
-          await worker.setParameters({ tessedit_pageseg_mode: psm });
+      for (let i = 0; i < variants.length; i++) {
+        const v = variants[i];
+        setPlateRecognitionHint(
+          `Recognizing plate (${i + 1}/${variants.length}) — ${v.name}`
+        );
 
-          const res = await worker.recognize(vUrl);
-          const raw = String(res?.data?.text ?? "");
-          const plate = extractBestPlateFromText(raw);
-          const cand = scorePlateCandidate(plate);
+        const blob = await (await fetch(v.dataUrl)).blob();
 
-          // Also consider Tesseract confidence
-          const conf = typeof res?.data?.confidence === "number" ? res.data.confidence : 0;
-          const combinedScore = cand.score + conf / 5;
-          if (combinedScore > best.score) {
-            best = { plate: cand.plate, score: combinedScore, source: `${name}/psm${psm}` };
-          }
+        const form = new FormData();
+        form.append("image", blob, "frame.jpg");
 
-          // Fast exit if very good
-          if (best.score >= 45 && best.plate.length >= 8) {
-            break;
-          }
+        // Call backend /anpr/scan which uses PlateRecogniser API
+        const res = await api.post("/anpr/scan", form, {
+          headers: { "Content-Type": "multipart/form-data" },
+        });
+
+        const plate = String(res?.data?.plate || "").trim();
+        const confidence = Number(res?.data?.confidence || 0);
+
+        const scored = scorePlateCandidate(plate);
+        const combined = confidence * 100 + scored.score;
+
+        if (combined > best.combined) {
+          best = {
+            plate: scored.plate,
+            combined,
+            conf: confidence,
+            source: v.name,
+          };
         }
-        if (best.score >= 45 && best.plate.length >= 8) {
-          break;
-        }
+
+        // Early exit if excellent confidence
+        if (best.plate && best.conf >= 0.85 && best.plate.length >= 8) break;
       }
 
       if (!best.plate) {
         setPlateText("");
+        setPlateRecognitionConfidence(null);
         throw new Error(
-          "Couldn’t reliably detect the plate. Try: fill the frame with the plate, avoid glare, keep it level, or type manually."
+          "Couldn't reliably detect the plate. Try: bring plate closer, avoid glare, keep it level, or use QR/manual."
         );
       }
 
       setPlateText(best.plate);
-      setOcrHint(`Best match from ${best.source}`);
+      setPlateRecognitionConfidence(best.conf);
+      setPlateRecognitionHint(`Best match from ${best.source}`);
     } catch (e) {
-      setError(e?.message || "OCR failed");
+      setError(
+        e?.response?.data?.message || e?.message || "Plate recognition failed"
+      );
     } finally {
-      setOcrBusy(false);
+      setPlateRecognitionBusy(false);
     }
   }
 
@@ -470,7 +419,7 @@ export default function GateScan() {
   return (
     <>
       <OwnerNavbar />
-      <div className="min-h-screen bg-linear-to-br from-[#0b0b0f] via-[#111827] to-black text-white px-4 sm:px-6 py-10">
+      <div className="min-h-screen bg-gradient-to-br from-[#0b0b0f] via-[#111827] to-black text-white px-4 sm:px-6 py-10">
         <div className="max-w-4xl mx-auto">
           <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-4 mb-6">
             <div>
@@ -533,20 +482,25 @@ export default function GateScan() {
           <div className="grid lg:grid-cols-2 gap-6">
             <div className="bg-[#0f172a] border border-white/10 rounded-2xl p-5">
               <h2 className="text-lg font-semibold">Number Plate Recognition</h2>
-              {/* <p className="text-gray-400 text-sm mt-1">
-                Demo-friendly OCR using camera + Tesseract.js.
-              </p> */}
+              <p className="text-gray-400 text-sm mt-1">
+                Using PlateRecogniser API for high accuracy plate detection
+              </p>
 
               <div className="mt-4 rounded-2xl overflow-hidden border border-white/10 bg-black/20">
                 <video ref={videoRef} className="w-full h-64 object-cover" playsInline muted />
               </div>
 
-              {ocrBusy ? (
+              {plateRecognitionBusy ? (
                 <p className="mt-3 text-xs text-gray-300">
-                  {ocrHint || "Running OCR…"} {typeof ocrProgress === "number" ? `(${Math.round(ocrProgress * 100)}%)` : ""}
+                  {plateRecognitionHint || "Running recognition…"}
                 </p>
-              ) : ocrHint ? (
-                <p className="mt-3 text-xs text-gray-400">{ocrHint}</p>
+              ) : plateRecognitionHint ? (
+                <p className="mt-3 text-xs text-gray-400">
+                  {plateRecognitionHint}
+                  {plateRecognitionConfidence !== null ? (
+                    <span> (confidence: {(plateRecognitionConfidence * 100).toFixed(0)}%)</span>
+                  ) : null}
+                </p>
               ) : null}
 
               <div className="mt-3 flex flex-wrap gap-2">
@@ -554,7 +508,7 @@ export default function GateScan() {
                   <button
                     type="button"
                     onClick={startCamera}
-                    className="px-4 py-2 rounded-xl bg-white text-black"
+                    className="px-4 py-2 rounded-xl bg-white text-black font-medium"
                   >
                     Start camera
                   </button>
@@ -579,11 +533,11 @@ export default function GateScan() {
 
                 <button
                   type="button"
-                  onClick={runOcr}
-                  disabled={!cameraOn || ocrBusy}
+                  onClick={runPlateRecognition}
+                  disabled={!cameraOn || plateRecognitionBusy}
                   className="px-4 py-2 rounded-xl border border-white/20 disabled:opacity-50"
                 >
-                  {ocrBusy ? `OCR… ${(ocrProgress * 100).toFixed(0)}%` : "Run OCR"}
+                  {plateRecognitionBusy ? "Recognizing…" : "Recognize Plate"}
                 </button>
               </div>
 
@@ -612,7 +566,7 @@ export default function GateScan() {
                 type="button"
                 onClick={submitPlate}
                 disabled={apiBusy || !plateNormalized}
-                className="mt-4 w-full bg-green-500 text-black py-3 rounded-xl hover:bg-green-400 disabled:opacity-60"
+                className="mt-4 w-full bg-green-500 text-black py-3 rounded-xl hover:bg-green-400 disabled:opacity-60 font-medium"
               >
                 {apiBusy ? "Submitting…" : mode === "ENTRY" ? "Allow entry (match booking)" : "Exit scan (CHECKED_OUT)"}
               </button>
@@ -621,7 +575,7 @@ export default function GateScan() {
             <div className="bg-[#0f172a] border border-white/10 rounded-2xl p-5">
               <h2 className="text-lg font-semibold">QR Fallback</h2>
               <p className="text-gray-400 text-sm mt-1">
-                If OCR fails, scan the QR from the receipt (or paste booking id).
+                If plate recognition fails, scan the QR from the receipt (or paste booking id).
               </p>
 
               <div className="mt-4 flex flex-wrap gap-2">
@@ -643,7 +597,7 @@ export default function GateScan() {
               </div>
 
               <div className="mt-4">
-                <label className="text-sm text-gray-300">Booking ID (from QR)</label>
+                <label className="text-sm text-gray-300">Booking ID (from QR or manual)</label>
                 <input
                   value={bookingId}
                   onChange={(e) => setBookingId(e.target.value)}
@@ -656,13 +610,13 @@ export default function GateScan() {
                 type="button"
                 onClick={submitBookingId}
                 disabled={apiBusy || !bookingId.trim()}
-                className="mt-4 w-full bg-white text-black py-3 rounded-xl hover:bg-gray-200 disabled:opacity-60"
+                className="mt-4 w-full bg-white text-black py-3 rounded-xl hover:bg-gray-200 disabled:opacity-60 font-medium"
               >
                 {apiBusy ? "Submitting…" : mode === "ENTRY" ? "Check in via QR" : "Check out via QR"}
               </button>
 
               <div className="mt-6 text-xs text-gray-500">
-                Tip: for best OCR results, zoom in on the plate and keep it level.
+                Tip: for best recognition results, zoom in on the plate and keep it level.
               </div>
             </div>
           </div>
