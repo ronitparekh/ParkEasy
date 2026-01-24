@@ -267,7 +267,8 @@ export default function GateScan() {
         const confidence = Number(res?.data?.confidence || 0);
 
         const scored = scorePlateCandidate(plate);
-        const combined = confidence * 100 + scored.score;
+        // Weight: 70% confidence + 30% heuristic score
+        const combined = confidence * 70 + scored.score * 3;
 
         if (combined > best.combined) {
           best = {
@@ -278,15 +279,16 @@ export default function GateScan() {
           };
         }
 
-        // Early exit if excellent confidence
-        if (best.plate && best.conf >= 0.85 && best.plate.length >= 8) break;
+        // Early exit if good enough (more lenient: 0.6+ confidence OR high heuristic score)
+        if (best.plate && (best.conf >= 0.6 || scored.score >= 25)) break;
       }
 
-      if (!best.plate) {
+      // Accept even low confidence if we have something that looks like a plate
+      if (!best.plate || (best.conf < 0.3 && best.combined < 30)) {
         setPlateText("");
         setPlateRecognitionConfidence(null);
         throw new Error(
-          "Couldn't reliably detect the plate. Try: bring plate closer, avoid glare, keep it level, or use QR/manual."
+          "Couldn't detect plate. Try: position plate center, improve lighting, avoid glare, or use QR/manual entry."
         );
       }
 
@@ -294,9 +296,27 @@ export default function GateScan() {
       setPlateRecognitionConfidence(best.conf);
       setPlateRecognitionHint(`Best match from ${best.source}`);
     } catch (e) {
-      setError(
-        e?.response?.data?.message || e?.message || "Plate recognition failed"
-      );
+      console.error("[GateScan] Plate recognition error:", e);
+      
+      let errorMsg = "Plate recognition failed";
+      
+      if (e?.response?.status === 401) {
+        errorMsg = "Invalid API key. Contact administrator.";
+      } else if (e?.response?.status === 429) {
+        errorMsg = "API rate limit exceeded. Try again in a moment.";
+      } else if (e?.response?.status === 400) {
+        errorMsg = e?.response?.data?.error || "Bad request - invalid image format.";
+      } else if (e?.response?.status === 503) {
+        errorMsg = "PlateRecogniser service unavailable. Check internet connection.";
+      } else if (e?.message?.includes("Network Error") || e?.message?.includes("ERR_NETWORK")) {
+        errorMsg = "Network error. Ensure backend is running on http://localhost:5000";
+      } else if (e?.response?.status === 500) {
+        errorMsg = e?.response?.data?.error || "Server error. Check backend logs.";
+      } else {
+        errorMsg = e?.response?.data?.message || e?.response?.data?.error || e?.message || errorMsg;
+      }
+      
+      setError(errorMsg);
     } finally {
       setPlateRecognitionBusy(false);
     }

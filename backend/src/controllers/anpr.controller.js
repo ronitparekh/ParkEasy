@@ -1,4 +1,5 @@
 import axios from "axios";
+import FormData from "form-data";
 
 /**
  * PlateRecogniser API Controller
@@ -78,31 +79,33 @@ export const scanPlate = async (req, res) => {
 
     // Prepare image for PlateRecogniser API
     const imageBuffer = req.file.buffer;
-    const imageBase64 = imageBuffer.toString("base64");
+    
+    // Create FormData for multipart request
+    const formData = new FormData();
+    formData.append("upload", imageBuffer, {
+      filename: "image.jpg",
+      contentType: req.file.mimetype,
+    });
 
-    // Call PlateRecogniser API
+    // Call PlateRecogniser API with FormData
     const prApiUrl = "https://api.platerecognizer.com/v1/plate-reader/";
     const prResponse = await axios.post(
       prApiUrl,
-      {
-        uploads: [
-          {
-            image: `data:${req.file.mimetype};base64,${imageBase64}`,
-          },
-        ],
-      },
+      formData,
       {
         headers: {
           Authorization: `Token ${PLATE_RECOGNISER_API_KEY}`,
-          "Content-Type": "application/json",
+          ...formData.getHeaders(),
         },
         timeout: 30000,
       }
     );
 
     // Extract plate from response
-    const uploads = prResponse.data?.uploads || [];
-    if (!uploads.length) {
+    // PlateRecogniser API returns: { results: [{plate: "ABC123", confidence: 0.95}, ...] }
+    const results = prResponse.data?.results || [];
+    
+    if (!results.length) {
       return res.status(200).json({
         plate: "",
         confidence: 0,
@@ -111,20 +114,33 @@ export const scanPlate = async (req, res) => {
       });
     }
 
-    const upload = uploads[0];
-    const results = upload.results || [];
-
-    // Get best plate
-    let bestPlate = extractBestPlateFromApi(results);
+    // Get best plate by confidence
+    let bestPlate = "";
     let bestConfidence = 0;
 
-    if (results.length && bestPlate) {
-      // Find the result for this plate
-      const matchingResult = results.find(
-        (r) => scorePlateCandidate(r.plate).plate === bestPlate
-      );
-      if (matchingResult) {
-        bestConfidence = Number(matchingResult.confidence || 0);
+    for (const result of results) {
+      const plate = String(result.plate || "").trim();
+      const confidence = Number(result.confidence || 0);
+      
+      if (confidence > bestConfidence) {
+        const scored = scorePlateCandidate(plate);
+        // Accept if: high confidence (>0.5) OR decent heuristic score (>5)
+        // This is more lenient than requiring high scores on both
+        if (confidence > 0.5 || scored.score > 5) {
+          bestPlate = scored.plate;
+          bestConfidence = confidence;
+        }
+      }
+    }
+
+    // If we found nothing with thresholds, just take the highest confidence one
+    if (!bestPlate && results.length > 0) {
+      const topResult = results[0];
+      const plate = String(topResult.plate || "").trim();
+      if (plate) {
+        const scored = scorePlateCandidate(plate);
+        bestPlate = scored.plate;
+        bestConfidence = Number(topResult.confidence || 0);
       }
     }
 
@@ -135,18 +151,37 @@ export const scanPlate = async (req, res) => {
       allResults: results, // Debug: return all results
     });
   } catch (error) {
-    console.error("[ANPR] PlateRecogniser error:", error.message);
+    console.error("[ANPR] Error details:", {
+      message: error.message,
+      status: error.response?.status,
+      statusText: error.response?.statusText,
+      data: error.response?.data,
+    });
 
     // If PlateRecogniser fails, return error but don't crash
     if (error.response?.status === 401) {
       return res.status(401).json({
-        error: "Invalid PlateRecogniser API key",
+        error: "Invalid PlateRecogniser API key. Check PLATE_RECOGNISER_API_KEY in .env",
       });
     }
 
     if (error.response?.status === 429) {
       return res.status(429).json({
         error: "PlateRecogniser rate limit exceeded. Try again later.",
+      });
+    }
+
+    if (error.response?.status === 400) {
+      return res.status(400).json({
+        error: `Bad request to PlateRecogniser: ${error.response?.data?.message || error.message}`,
+        debug: error.response?.data,
+      });
+    }
+
+    // Network or other errors
+    if (error.code === "ECONNREFUSED" || error.code === "ENOTFOUND") {
+      return res.status(503).json({
+        error: "Cannot reach PlateRecogniser API. Check your internet connection.",
       });
     }
 
