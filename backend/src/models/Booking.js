@@ -125,6 +125,23 @@ const bookingSchema = new mongoose.Schema(
       type: Date,
     },
 
+    arrivedAtGateAt: {
+      type: Date,
+    },
+
+    queueHoldUntil: {
+      type: Date,
+    },
+
+    queueHoldRevokedAt: {
+      type: Date,
+    },
+
+    queueHoldRevokedReason: {
+      type: String,
+      trim: true,
+    },
+
     payment: {
       provider: {
         type: String,

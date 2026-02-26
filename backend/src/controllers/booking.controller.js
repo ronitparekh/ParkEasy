@@ -2,6 +2,7 @@ import Booking from "../models/Booking.js";
 import Parking from "../models/Parking.js";
 import User from "../models/User.js";
 import { normalizePlate } from "../utils/plate.js";
+import { getDistanceKm } from "../utils/distance.js";
 import {
   formatIstDateYmd,
   getBookingStartEndIst,
@@ -9,6 +10,11 @@ import {
   makeUtcDateFromIstParts,
   parseYmd,
 } from "../utils/ist.js";
+
+const ARRIVED_GATE_MAX_DISTANCE_KM = 0.05; // 50m
+const ARRIVED_GATE_HOLD_MS = 10 * 60 * 1000; // 10 minutes
+const ARRIVED_GATE_NEAR_CUTOFF_MS = 5 * 60 * 1000; // allow only in last 5 minutes before cutoff
+const NO_CHECKIN_GRACE_MS = 20 * 60 * 1000; // keep in sync with bookingAutoComplete job
 
 function requireOwner(req, res) {
   if (req.user?.role !== "OWNER") {
@@ -19,13 +25,182 @@ function requireOwner(req, res) {
 }
 
 function getTodayRange() {
-  // Production servers often run in UTC; bookings are intended for IST.
   return getTodayIstRange(new Date());
 }
 
 function getBookingStartEnd(booking) {
   return getBookingStartEndIst(booking);
 }
+
+function toNumberOrNaN(value) {
+  const n = typeof value === "number" ? value : Number(value);
+  return Number.isFinite(n) ? n : Number.NaN;
+}
+
+async function loadUserBookingOr403(req, res, bookingId) {
+  const booking = await Booking.findById(bookingId);
+  if (!booking) {
+    res.status(404).json({ message: "Booking not found" });
+    return null;
+  }
+  if (String(booking.userId) !== String(req.user?.id)) {
+    res.status(403).json({ message: "Access denied" });
+    return null;
+  }
+  return booking;
+}
+
+async function loadParkingOr404(res, parkingId) {
+  const parking = await Parking.findById(parkingId).select("lat lng");
+  if (!parking) {
+    res.status(404).json({ message: "Parking not found" });
+    return null;
+  }
+  return parking;
+}
+
+function assertWithinGateRangeOr400(res, { userLat, userLng, parkingLat, parkingLng }) {
+  if (![userLat, userLng, parkingLat, parkingLng].every((n) => typeof n === "number" && Number.isFinite(n))) {
+    res.status(400).json({ message: "Invalid location coordinates" });
+    return null;
+  }
+  const distanceKm = getDistanceKm(userLat, userLng, parkingLat, parkingLng);
+  if (!Number.isFinite(distanceKm)) {
+    res.status(400).json({ message: "Failed to compute distance" });
+    return null;
+  }
+  if (distanceKm > ARRIVED_GATE_MAX_DISTANCE_KM) {
+    res.status(400).json({ message: "You must be within 50m of the parking gate" });
+    return null;
+  }
+  return distanceKm;
+}
+
+function assertBeyondGateRangeOr400(res, { userLat, userLng, parkingLat, parkingLng }) {
+  if (![userLat, userLng, parkingLat, parkingLng].every((n) => typeof n === "number" && Number.isFinite(n))) {
+    res.status(400).json({ message: "Invalid location coordinates" });
+    return null;
+  }
+  const distanceKm = getDistanceKm(userLat, userLng, parkingLat, parkingLng);
+  if (!Number.isFinite(distanceKm)) {
+    res.status(400).json({ message: "Failed to compute distance" });
+    return null;
+  }
+  if (distanceKm <= ARRIVED_GATE_MAX_DISTANCE_KM) {
+    res.status(400).json({ message: "You are still within 50m of the parking gate" });
+    return null;
+  }
+  return distanceKm;
+}
+
+function computeNoCheckinExpireAt({ booking, start, end }) {
+  if (!start || !end) return null;
+  if (booking?.status === "PENDING_PAYMENT") return null;
+  return new Date(Math.min(end.getTime(), start.getTime() + NO_CHECKIN_GRACE_MS));
+}
+
+export const arrivedAtGate = async (req, res) => {
+  try {
+    const booking = await loadUserBookingOr403(req, res, req.params.id);
+    if (!booking) return;
+
+    const gate = booking.gateStatus ?? "PENDING_ENTRY";
+    if (!["UPCOMING", "ACTIVE"].includes(booking.status) || gate !== "PENDING_ENTRY") {
+      return res.status(400).json({ message: "Booking is not eligible for gate arrival" });
+    }
+
+    const now = new Date();
+    const { start, end } = getBookingStartEnd(booking);
+    if (!start || !end) {
+      return res.status(400).json({ message: "Booking time is invalid" });
+    }
+
+    if (now < start) {
+      return res.status(400).json({ message: "You can mark arrival only after booking start time" });
+    }
+
+    const expireAt = computeNoCheckinExpireAt({ booking, start, end });
+    if (expireAt && now >= expireAt) {
+      return res.status(400).json({ message: "Booking has already expired" });
+    }
+
+    if (expireAt) {
+      const windowStart = new Date(expireAt.getTime() - ARRIVED_GATE_NEAR_CUTOFF_MS);
+      if (now < windowStart) {
+        return res.status(400).json({
+          message: "Arrived at gate is allowed only near cutoff (last 5 minutes before expiry)",
+        });
+      }
+    }
+
+    const userLat = toNumberOrNaN(req.body?.lat);
+    const userLng = toNumberOrNaN(req.body?.lng);
+    if (!Number.isFinite(userLat) || !Number.isFinite(userLng)) {
+      return res.status(400).json({ message: "lat and lng are required" });
+    }
+
+    const parking = await loadParkingOr404(res, booking.parkingId);
+    if (!parking) return;
+
+    const ok = assertWithinGateRangeOr400(res, {
+      userLat,
+      userLng,
+      parkingLat: parking.lat,
+      parkingLng: parking.lng,
+    });
+    if (ok === null) return;
+
+    booking.arrivedAtGateAt = now;
+    booking.queueHoldUntil = new Date(now.getTime() + ARRIVED_GATE_HOLD_MS);
+    booking.queueHoldRevokedAt = undefined;
+    booking.queueHoldRevokedReason = undefined;
+    await booking.save();
+
+    return res.json({ message: "Arrival recorded", booking });
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ message: "Failed to record arrival" });
+  }
+};
+
+export const revokeArrivedAtGate = async (req, res) => {
+  try {
+    const booking = await loadUserBookingOr403(req, res, req.params.id);
+    if (!booking) return;
+
+    const now = new Date();
+    if (!booking.queueHoldUntil || booking.queueHoldUntil <= now) {
+      return res.status(400).json({ message: "No active queue hold" });
+    }
+
+    const userLat = toNumberOrNaN(req.body?.lat);
+    const userLng = toNumberOrNaN(req.body?.lng);
+    if (!Number.isFinite(userLat) || !Number.isFinite(userLng)) {
+      return res.status(400).json({ message: "lat and lng are required" });
+    }
+
+    const parking = await loadParkingOr404(res, booking.parkingId);
+    if (!parking) return;
+
+    const ok = assertBeyondGateRangeOr400(res, {
+      userLat,
+      userLng,
+      parkingLat: parking.lat,
+      parkingLng: parking.lng,
+    });
+    if (ok === null) return;
+
+    booking.queueHoldUntil = undefined;
+    booking.queueHoldRevokedAt = now;
+    booking.queueHoldRevokedReason = "OUT_OF_RANGE";
+    await booking.save();
+
+    return res.json({ message: "Queue hold revoked", booking });
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ message: "Failed to revoke queue hold" });
+  }
+};
 
 async function assertOwnerOwnsParking(req, res, parkingId) {
   const parking = await Parking.findById(parkingId);
@@ -105,9 +280,6 @@ function addLiveOverstayFields(bookingDoc, now) {
   return booking;
 }
 
-// =========================
-// CREATE BOOKING (PHASE 2)
-// =========================
 export const createBooking = async (req, res) => {
   try {
     const userId = req.user.id;
@@ -139,7 +311,6 @@ export const createBooking = async (req, res) => {
       return res.status(400).json({ message: "Invalid booking date" });
     }
 
-    // Store as the UTC instant corresponding to IST midnight for that date.
     const bookingDateOnly = makeUtcDateFromIstParts({ ...ymd, hour: 0, minute: 0, second: 0, ms: 0 });
 
     const [startHRaw, startMRaw] = String(startTime).split(":");
@@ -182,10 +353,9 @@ export const createBooking = async (req, res) => {
     const totalPrice = duration * Number(parking.price);
 
     if (clientDuration && Number(clientDuration) !== duration) {
-      // Non-fatal: server is source of truth
     }
+
     if (clientTotalPrice && Number(clientTotalPrice) !== totalPrice) {
-      // Non-fatal: server is source of truth
     }
 
     const user = await User.findById(userId).select("name email phone");
@@ -194,7 +364,6 @@ export const createBooking = async (req, res) => {
     const initialStatus = now < startDateTime ? "UPCOMING" : now < endDateTime ? "ACTIVE" : "EXPIRED";
 
     if (initialStatus === "EXPIRED") {
-      // Do not allow creating a booking for a past time window.
       bumpSlotsOnCheckout(parking);
       await parking.save();
       return res.status(400).json({ message: "Booking time has already passed" });
@@ -223,9 +392,6 @@ export const createBooking = async (req, res) => {
   }
 };
 
-// =========================
-// GET USER BOOKINGS
-// =========================
 export const getMyBookings = async (req, res) => {
   try {
     const bookings = await Booking.find({
@@ -242,9 +408,6 @@ export const getMyBookings = async (req, res) => {
   }
 };
 
-// =========================
-// GET OWNER BOOKINGS
-// =========================
 export const getOwnerBookings = async (req, res) => {
   try {
     if (req.user.role !== "OWNER") {
@@ -289,9 +452,6 @@ export const getOwnerBookings = async (req, res) => {
   }
 };
 
-// =========================
-// CANCEL BOOKING
-// =========================
 export const cancelBooking = async (req, res) => {
   try {
     const booking = await Booking.findById(req.params.id);
@@ -317,7 +477,6 @@ export const cancelBooking = async (req, res) => {
 
     let refundPercent = 0;
 
-    // 100% refund only for instant cancellation right after PAYMENT succeeds.
     if (
       booking.payment?.status === "PAID" &&
       booking.payment?.paidAt &&
@@ -325,7 +484,6 @@ export const cancelBooking = async (req, res) => {
     ) {
       refundPercent = 1;
     } else if (start && now.getTime() < start.getTime()) {
-      // Otherwise, refund is based ONLY on time-to-start.
       const msToStart = start.getTime() - now.getTime();
       if (msToStart >= 60 * 60 * 1000) {
         refundPercent = 0.75;
@@ -347,7 +505,6 @@ export const cancelBooking = async (req, res) => {
     booking.refundAmount = refundAmount;
     await booking.save();
 
-    // 🔼 Restore parking slot
     const parking = await Parking.findById(booking.parkingId);
     if (parking) {
       bumpSlotsOnCheckout(parking);
@@ -365,9 +522,6 @@ export const cancelBooking = async (req, res) => {
   }
 };
 
-// =========================
-// OWNER: CHECK-IN / CHECK-OUT (PLATE OCR)
-// =========================
 export const ownerCheckInByPlate = async (req, res) => {
   try {
     if (!requireOwner(req, res)) return;
@@ -486,9 +640,6 @@ export const ownerCheckOutByPlate = async (req, res) => {
   }
 };
 
-// =========================
-// OWNER: CHECK-IN / CHECK-OUT (QR / BOOKING ID)
-// =========================
 export const ownerCheckInByBookingId = async (req, res) => {
   try {
     if (!requireOwner(req, res)) return;

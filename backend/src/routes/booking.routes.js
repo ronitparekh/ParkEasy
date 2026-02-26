@@ -8,6 +8,8 @@ import {
   ownerCheckOutByPlate,
   ownerCheckInByBookingId,
   ownerCheckOutByBookingId,
+  arrivedAtGate,
+  revokeArrivedAtGate,
 } from "../controllers/booking.controller.js";
 import { protect } from "../middleware/auth.middleware.js";
 
@@ -29,6 +31,10 @@ router.post("/owner/gate/check-out/plate", protect, ownerCheckOutByPlate);
 // OWNER GATE: QR/bookingId fallback
 router.post("/owner/gate/check-in/booking", protect, ownerCheckInByBookingId);
 router.post("/owner/gate/check-out/booking", protect, ownerCheckOutByBookingId);
+
+// USER: queue protection (Arrived at gate)
+router.post("/:id/arrive-at-gate", protect, arrivedAtGate);
+router.post("/:id/arrive-at-gate/revoke", protect, revokeArrivedAtGate);
 
 // Cancel booking
 router.put("/:id/cancel", protect, cancelBooking);

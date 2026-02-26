@@ -53,6 +53,9 @@ export const startBookingAutoCompleteJob = () => {
 
         // ACTIVE -> EXPIRED if not checked in within 20 minutes of start, OR if booking ended without check-in.
         if (booking.status === "ACTIVE" && gate === "PENDING_ENTRY") {
+          if (booking.queueHoldUntil && now < booking.queueHoldUntil) {
+            continue;
+          }
           const noCheckinGraceMs = 20 * 60 * 1000;
           const expireAt = new Date(Math.min(end.getTime(), start.getTime() + noCheckinGraceMs));
           if (now >= expireAt) {

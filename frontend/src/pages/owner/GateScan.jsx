@@ -439,7 +439,7 @@ export default function GateScan() {
   return (
     <>
       <OwnerNavbar />
-      <div className="min-h-screen bg-gradient-to-br from-[#0b0b0f] via-[#111827] to-black text-white px-4 sm:px-6 py-10">
+      <div className="min-h-screen bg-linear-to-br from-[#0b0b0f] via-[#111827] to-black text-white px-4 sm:px-6 py-10">
         <div className="max-w-4xl mx-auto">
           <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-4 mb-6">
             <div>

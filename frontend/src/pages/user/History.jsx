@@ -1,16 +1,118 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import api from "../../api/api";
 import { downloadReceipt } from "../../utils/receipt";
+import { getDistanceKm } from "../../utils/distance";
 import UserNavbar from "../../components/UserNavbar";
+
+const ARRIVED_GATE_MAX_DISTANCE_KM = 0.05; // 50m
 
 export default function History() {
     const [bookings, setBookings] = useState([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState("");
+    const activeWatchesRef = useRef({});
 
     useEffect(() => {
         fetchBookings();
     }, []);
+
+    useEffect(() => {
+        return () => {
+            // cleanup geolocation watches
+            try {
+                const watches = activeWatchesRef.current || {};
+                Object.values(watches).forEach((watchId) => {
+                    if (typeof watchId === "number") navigator.geolocation.clearWatch(watchId);
+                });
+            } catch {
+                // ignore
+            }
+            activeWatchesRef.current = {};
+        };
+    }, []);
+
+    function getCurrentPosition() {
+        return new Promise((resolve, reject) => {
+            if (!navigator.geolocation) {
+                reject(new Error("Geolocation not supported"));
+                return;
+            }
+            navigator.geolocation.getCurrentPosition(resolve, reject, {
+                enableHighAccuracy: true,
+                timeout: 15000,
+                maximumAge: 0,
+            });
+        });
+    }
+
+    async function markArrivedAtGate(bookingId, parkingLat, parkingLng) {
+        try {
+            if (typeof parkingLat !== "number" || typeof parkingLng !== "number") {
+                alert("Parking location not available");
+                return;
+            }
+
+            const pos = await getCurrentPosition();
+            const userLat = pos.coords.latitude;
+            const userLng = pos.coords.longitude;
+
+            const dKm = getDistanceKm(userLat, userLng, parkingLat, parkingLng);
+            if (!Number.isFinite(dKm) || dKm > ARRIVED_GATE_MAX_DISTANCE_KM) {
+                alert("You must be within 50m of the gate to use this option");
+                return;
+            }
+
+            await api.post(`/booking/${bookingId}/arrive-at-gate`, {
+                lat: userLat,
+                lng: userLng,
+            });
+
+            await fetchBookings();
+            startOutOfRangeWatcher(bookingId, parkingLat, parkingLng);
+        } catch (err) {
+            console.error("Arrived at gate failed", err);
+            alert(err?.response?.data?.message || "Failed to record arrival");
+        }
+    }
+
+    function startOutOfRangeWatcher(bookingId, parkingLat, parkingLng) {
+        if (!navigator.geolocation) return;
+        if (activeWatchesRef.current[bookingId]) return;
+
+        const watchId = navigator.geolocation.watchPosition(
+            async (pos) => {
+                try {
+                    const userLat = pos.coords.latitude;
+                    const userLng = pos.coords.longitude;
+                    const dKm = getDistanceKm(userLat, userLng, parkingLat, parkingLng);
+                    if (!Number.isFinite(dKm) || dKm <= ARRIVED_GATE_MAX_DISTANCE_KM) return;
+
+                    // moved out of range -> revoke hold
+                    await api.post(`/booking/${bookingId}/arrive-at-gate/revoke`, {
+                        lat: userLat,
+                        lng: userLng,
+                    });
+
+                    await fetchBookings();
+                } catch (e) {
+                    // ignore transient failures; revocation can be retried on next update
+                } finally {
+                    const wid = activeWatchesRef.current[bookingId];
+                    if (typeof wid === "number") navigator.geolocation.clearWatch(wid);
+                    delete activeWatchesRef.current[bookingId];
+                }
+            },
+            () => {
+                // no-op
+            },
+            {
+                enableHighAccuracy: true,
+                maximumAge: 0,
+            }
+        );
+
+        activeWatchesRef.current[bookingId] = watchId;
+    }
 
     async function fetchBookings() {
         try {
@@ -100,6 +202,10 @@ export default function History() {
                                     !Number.isNaN(parkingLat) &&
                                     !Number.isNaN(parkingLng);
 
+                                const gate = b.gateStatus || "PENDING_ENTRY";
+                                const queueHoldUntil = b.queueHoldUntil ? new Date(b.queueHoldUntil) : null;
+                                const queueHoldActive = queueHoldUntil && queueHoldUntil.getTime() > Date.now();
+
                                 return (
                                     <div
                                         key={b._id}
@@ -166,6 +272,12 @@ export default function History() {
                                             Overstay Fine: ₹{Number(b.overstayFineDue || b.overstayFine || 0)}
                                         </p>
                                     ) : null}
+
+                                    {queueHoldActive ? (
+                                        <p className="text-cyan-300 font-semibold">
+                                            Queue hold active (10 min)
+                                        </p>
+                                    ) : null}
                                 </div>
 
                                 {/* ACTIONS */}
@@ -198,6 +310,16 @@ export default function History() {
                                             Cancel
                                         </button>
                                     )}
+
+                                    {(b.status === "ACTIVE" && gate === "PENDING_ENTRY" && !queueHoldActive) ? (
+                                        <button
+                                            onClick={() => markArrivedAtGate(b._id, parkingLat, parkingLng)}
+                                            disabled={!canDirections}
+                                            className="px-4 py-2 border border-white/20 rounded-xl hover:bg-white/10 disabled:opacity-50"
+                                        >
+                                            Arrived at gate
+                                        </button>
+                                    ) : null}
                                 </div>
                             </div>
                                 );
