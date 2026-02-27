@@ -118,6 +118,11 @@ export default function GateScan() {
   const [params] = useSearchParams();
   const parkingId = params.get("parkingId") || "";
 
+  const [ownerParkings, setOwnerParkings] = useState([]);
+  const [parkingsBusy, setParkingsBusy] = useState(false);
+  const [parkingsError, setParkingsError] = useState("");
+  const [selectedParkingId, setSelectedParkingId] = useState("");
+
   const [mode, setMode] = useState("ENTRY");
   const [cameraOn, setCameraOn] = useState(false);
   const [videoError, setVideoError] = useState("");
@@ -140,12 +145,43 @@ export default function GateScan() {
 
   const plateNormalized = useMemo(() => normalizePlate(plateText), [plateText]);
 
+  const selectedParking = useMemo(() => {
+    if (!selectedParkingId) return null;
+    return ownerParkings.find((p) => p._id === selectedParkingId) || null;
+  }, [ownerParkings, selectedParkingId]);
+
+  useEffect(() => {
+    if (parkingId) setSelectedParkingId(parkingId);
+  }, [parkingId]);
+
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      try {
+        setParkingsError("");
+        setParkingsBusy(true);
+        const res = await api.get("/owner/parkings");
+        if (!alive) return;
+        setOwnerParkings(res.data || []);
+      } catch (e) {
+        if (!alive) return;
+        setParkingsError(
+          e?.response?.data?.message || e?.message || "Failed to load parkings"
+        );
+      } finally {
+        if (alive) setParkingsBusy(false);
+      }
+    })();
+    return () => {
+      alive = false;
+    };
+  }, []);
+
   useEffect(() => {
     return () => {
       stopCamera();
       stopQrScan();
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   async function startCamera() {
@@ -385,7 +421,7 @@ export default function GateScan() {
       setError("");
       setResult(null);
 
-      if (!parkingId) throw new Error("Missing parkingId. Open this page from a parking card.");
+      if (!selectedParkingId) throw new Error("Select a parking first.");
       if (!plateNormalized) throw new Error("Enter / scan a number plate first");
 
       setApiBusy(true);
@@ -396,7 +432,7 @@ export default function GateScan() {
           : "/booking/owner/gate/check-out/plate";
 
       const res = await api.post(endpoint, {
-        parkingId,
+        parkingId: selectedParkingId,
         plateNumber: plateNormalized,
         rawText: plateText,
       });
@@ -425,7 +461,7 @@ export default function GateScan() {
 
       const res = await api.post(endpoint, {
         bookingId: bookingId.trim(),
-        parkingId: parkingId || undefined,
+        parkingId: selectedParkingId || undefined,
       });
 
       setResult(res.data);
@@ -445,7 +481,10 @@ export default function GateScan() {
             <div>
               <h1 className="text-3xl font-bold">Gate Scan</h1>
               <p className="text-gray-400 text-sm mt-1">
-                Parking: <span className="text-white/90">{parkingId || "(missing)"}</span>
+                Parking:{" "}
+                <span className="text-white/90">
+                  {selectedParking?.name || selectedParkingId || "(select parking)"}
+                </span>
               </p>
             </div>
 
@@ -480,6 +519,32 @@ export default function GateScan() {
               {videoError || error}
             </div>
           ) : null}
+
+          {parkingsError ? (
+            <div className="mb-4 text-sm text-red-200 bg-red-500/10 border border-red-500/20 rounded-xl p-3">
+              {parkingsError}
+            </div>
+          ) : null}
+
+          <div className="mb-6 bg-[#0f172a] border border-white/10 rounded-2xl p-5">
+            <label className="text-sm text-gray-300">Select parking</label>
+            <select
+              value={selectedParkingId}
+              onChange={(e) => setSelectedParkingId(e.target.value)}
+              disabled={parkingsBusy}
+              className="mt-2 w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3"
+            >
+              <option value="">{parkingsBusy ? "Loading…" : "Choose a parking"}</option>
+              {ownerParkings.map((p) => (
+                <option key={p._id} value={p._id}>
+                  {p.name}
+                </option>
+              ))}
+            </select>
+            <p className="text-xs text-gray-500 mt-2">
+              Plate-based scan requires a selected parking. QR booking-id scan can work without it.
+            </p>
+          </div>
 
           {result?.booking ? (
             <div className="mb-6 bg-green-500/10 border border-green-500/20 rounded-2xl p-4">

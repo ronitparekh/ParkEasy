@@ -97,66 +97,77 @@ export default function OwnerBookings() {
                                 if (b.status === "EXPIRED" && b?.payment?.failureReason === "PAYMENT_WINDOW_EXPIRED") return false;
                                 return true;
                             })
-                            .map((b) => (
-                            <div
-                                key={b._id ?? b.id}
-                                className="bg-[#0f172a] border border-white/10 p-5 rounded-2xl"
-                            >
-                                <h3 className="font-semibold">
-                                    {b.parkingId?.name || "Parking"}
-                                </h3>
+                            .map((b) => {
+                                const whenText = formatWhen(b) || "—";
+                                const hasOverstay = Number(b.overstayFineDue || 0) > 0 || Number(b.overstayFine || 0) > 0;
+                                const hasRefund = b.status === "CANCELLED" && Number(b.refundAmount || 0) > 0;
+                                const inText = b.checkedInAt ? new Date(b.checkedInAt).toLocaleTimeString() : "";
+                                const outText = b.checkedOutAt ? new Date(b.checkedOutAt).toLocaleTimeString() : "";
 
-                                <p className="text-sm text-gray-400 mt-1">
-                                    Customer: {b.userId?.email || "—"}
-                                </p>
+                                return (
+                                    <div
+                                        key={b._id ?? b.id}
+                                        className="bg-[#0f172a] border border-white/10 p-5 rounded-2xl flex flex-col h-full min-w-0"
+                                    >
+                                        <div className="min-w-0">
+                                            <h3
+                                                className="font-semibold text-lg leading-snug min-w-0 overflow-hidden [display:-webkit-box] [-webkit-line-clamp:2] [-webkit-box-orient:vertical] min-h-13"
+                                                title={b.parkingId?.name || "Parking"}
+                                            >
+                                                {b.parkingId?.name || "Parking"}
+                                            </h3>
 
-                                <p className="text-sm text-gray-500 mt-1">
-                                    Vehicle: {b.vehicleNumber || "—"}
-                                </p>
+                                            <div className="mt-3 space-y-1">
+                                                <p className="text-sm text-gray-400 wrap-break-word">
+                                                    Customer: {b.userId?.email || "—"}
+                                                </p>
 
-                                <p className="text-sm text-gray-500 mt-1">
-                                    Gate: {b.gateStatus || "PENDING_ENTRY"}
-                                </p>
+                                                <p className="text-sm text-gray-500">
+                                                    Vehicle: {b.vehicleNumber || "—"}
+                                                </p>
 
-                                {(Number(b.overstayFineDue || 0) > 0 || Number(b.overstayFine || 0) > 0) ? (
-                                    <p className="text-sm text-amber-300 mt-1">
-                                        Overstay fine: ₹{Number(b.overstayFineDue || b.overstayFine || 0)}
-                                    </p>
-                                ) : null}
+                                                <p className="text-sm text-gray-500">
+                                                    Gate: {b.gateStatus || "PENDING_ENTRY"}
+                                                </p>
 
-                                {b.checkedInAt ? (
-                                    <p className="text-xs text-gray-600 mt-1">
-                                        In: {new Date(b.checkedInAt).toLocaleTimeString()}
-                                    </p>
-                                ) : null}
+                                                <p className="text-sm text-gray-500">{whenText}</p>
+                                            </div>
 
-                                {b.checkedOutAt ? (
-                                    <p className="text-xs text-gray-600 mt-1">
-                                        Out: {new Date(b.checkedOutAt).toLocaleTimeString()}
-                                    </p>
-                                ) : null}
+                                            {(hasOverstay || hasRefund || inText || outText) ? (
+                                                <div className="mt-3 space-y-1">
+                                                    {hasOverstay ? (
+                                                        <p className="text-sm text-amber-300">
+                                                            Overstay fine: ₹{Number(b.overstayFineDue || b.overstayFine || 0)}
+                                                        </p>
+                                                    ) : null}
 
-                                <p className="text-sm text-gray-500 mt-1">
-                                    {formatWhen(b) || ""}
-                                </p>
+                                                    {inText ? (
+                                                        <p className="text-xs text-gray-600">In: {inText}</p>
+                                                    ) : null}
 
-                                {b.status === "CANCELLED" && Number(b.refundAmount || 0) > 0 ? (
-                                    <p className="text-sm text-amber-300 mt-1">
-                                        Refunded: ₹{Number(b.refundAmount || 0)}
-                                        {typeof b.refundPercent === "number" ? ` (${Math.round(b.refundPercent * 100)}%)` : ""}
-                                    </p>
-                                ) : null}
+                                                    {outText ? (
+                                                        <p className="text-xs text-gray-600">Out: {outText}</p>
+                                                    ) : null}
 
-                                <div className="mt-3 flex items-center justify-between">
-                                    <p className="font-bold">₹{b.totalPrice ?? b.total ?? 0}</p>
-                                    <span className={
-                                        statusClass(b.status)
-                                    }>
-                                        {b.status}
-                                    </span>
-                                </div>
-                            </div>
-                        ))}
+                                                    {hasRefund ? (
+                                                        <p className="text-sm text-amber-300">
+                                                            Refunded: ₹{Number(b.refundAmount || 0)}
+                                                            {typeof b.refundPercent === "number" ? ` (${Math.round(b.refundPercent * 100)}%)` : ""}
+                                                        </p>
+                                                    ) : null}
+                                                </div>
+                                            ) : null}
+                                        </div>
+
+                                        <div className="mt-auto pt-4 flex items-end justify-between gap-4">
+                                            <p className="font-bold text-lg">₹{b.totalPrice ?? b.total ?? 0}</p>
+                                            <span className={"text-sm font-semibold " + statusClass(b.status)}>
+                                                {b.status}
+                                            </span>
+                                        </div>
+                                    </div>
+                                );
+                            })}
                     </div>
                 </div>
             </div>

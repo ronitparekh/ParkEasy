@@ -47,6 +47,9 @@ export default function OwnerNavbar() {
             <Link to="/owner/bookings" className="text-gray-300 hover:text-white">
               Bookings
             </Link>
+            <Link to="/owner/gate-scan" className="text-gray-300 hover:text-white">
+              Gate Scan
+            </Link>
             <button
               onClick={handleLogout}
               className="bg-white text-black px-4 py-2 rounded-xl hover:bg-gray-200"
@@ -92,6 +95,13 @@ export default function OwnerNavbar() {
               className="rounded-xl px-3 py-2 text-gray-200 hover:bg-white/5"
             >
               Bookings
+            </Link>
+            <Link
+              to="/owner/gate-scan"
+              onClick={() => setOpen(false)}
+              className="rounded-xl px-3 py-2 text-gray-200 hover:bg-white/5"
+            >
+              Gate Scan
             </Link>
             <button
               type="button"

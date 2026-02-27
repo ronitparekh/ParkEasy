@@ -6,6 +6,7 @@ import { useNavigate } from "react-router-dom";
 
 export default function OwnerParkings() {
   const [parkings, setParkings] = useState([]);
+  const [query, setQuery] = useState("");
   const [editingId, setEditingId] = useState(null);
   const [editOpen, setEditOpen] = useState(false);
   const [editForm, setEditForm] = useState({
@@ -90,6 +91,14 @@ export default function OwnerParkings() {
   const editingParking = editingId
     ? parkings.find((p) => p._id === editingId)
     : null;
+
+  const normalizedQuery = String(query || "").trim().toLowerCase();
+  const filteredParkings = normalizedQuery
+    ? parkings.filter((p) => {
+        const name = String(p?.name || "").toLowerCase();
+        return name.includes(normalizedQuery);
+      })
+    : parkings;
 
   return (
     <>
@@ -211,13 +220,34 @@ export default function OwnerParkings() {
 
       <div className="min-h-screen bg-linear-to-br from-[#0b0b0f] via-[#111827] to-black text-white px-4 sm:px-6 py-10">
         <div className="max-w-6xl w-full min-w-0 mx-auto">
-          <h1 className="text-3xl font-bold mb-8">My Parking Spaces</h1>
+          <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-4 mb-8">
+            <div>
+              <h1 className="text-3xl font-bold">My Parking Spaces</h1>
+              {parkings.length ? (
+                <p className="text-sm text-gray-400 mt-1">
+                  Showing {filteredParkings.length} of {parkings.length}
+                </p>
+              ) : null}
+            </div>
+
+            <div className="w-full sm:max-w-sm">
+              <label className="text-sm text-gray-300">Search</label>
+              <input
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                placeholder="Search your parking spaces"
+                className="mt-2 w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3"
+              />
+            </div>
+          </div>
 
           {parkings.length === 0 ? (
             <p className="text-gray-400">No parking spaces added yet.</p>
+          ) : filteredParkings.length === 0 ? (
+            <p className="text-gray-400">No parking spaces match your search.</p>
           ) : (
             <div className="grid w-full min-w-0 md:grid-cols-2 lg:grid-cols-3 gap-6">
-              {parkings.map((p) => (
+              {filteredParkings.map((p) => (
                 <div
                   key={p._id}
                   className="w-full max-w-full min-w-0 bg-[#0f172a] border border-white/10 rounded-xl p-5 flex flex-col min-h-48"
@@ -252,15 +282,9 @@ export default function OwnerParkings() {
                     </button>
                     <button
                       onClick={() => navigate(`/owner/bookings?parkingId=${p._id}`)}
-                      className="w-full sm:flex-1 border border-white/20 rounded-lg py-2"
-                    >
-                      View bookings
-                    </button>
-                    <button
-                      onClick={() => navigate(`/owner/gate-scan?parkingId=${p._id}`)}
                       className="w-full sm:flex-1 bg-white text-black rounded-lg py-2"
                     >
-                      Gate scan
+                      View bookings
                     </button>
                   </div>
                 </div>
