@@ -6,7 +6,19 @@ export default function ParkingCard({ parking, selected, onSelect }) {
   const { _id, name, price, totalSlots = 0, availableSlots = 0, lat, lng } =
     parking;
 
-  const isFull = availableSlots <= 0;
+  const totalSlotsNum = Number(totalSlots || 0);
+  const availableSlotsNum = Number(availableSlots || 0);
+
+  // Keep UI consistent with backend conflict-buffer capacity.
+  // conflict_buffer = max(2, ceil(10% of total_slots))
+  // bookable_available = max(0, availableSlots - conflict_buffer)
+  const conflictBuffer =
+    Number.isFinite(totalSlotsNum) && totalSlotsNum > 0
+      ? Math.min(totalSlotsNum, Math.max(2, Math.ceil(totalSlotsNum * 0.1)))
+      : 0;
+
+  const bookableAvailable = Math.max(0, availableSlotsNum - conflictBuffer);
+  const isFull = bookableAvailable <= 0;
 
   function openDirections(e) {
     e.stopPropagation();
@@ -46,8 +58,8 @@ export default function ParkingCard({ parking, selected, onSelect }) {
           </p>
           <p>
             Available:{" "}
-            <span className={availableSlots > 0 ? "text-green-400" : "text-red-400"}>
-              {availableSlots}
+            <span className={bookableAvailable > 0 ? "text-green-400" : "text-red-400"}>
+              {bookableAvailable}
             </span>
           </p>
         </div>

@@ -4,6 +4,11 @@ import Booking from "../models/Booking.js";
 import Parking from "../models/Parking.js";
 import User from "../models/User.js";
 import {
+  buildActiveBookingsCapacityQuery,
+  computeBookableLimit,
+  computeConflictBuffer,
+} from "../utils/capacity.js";
+import {
   formatIstDateYmd,
   getBookingStartEndIst,
   makeUtcDateFromIstParts,
@@ -137,14 +142,33 @@ export async function createRazorpayOrder(req, res) {
     }
 
     // Atomically hold a slot
+    const capParking = await Parking.findById(parkingId).select("totalSlots");
+    if (!capParking) {
+      return res.status(404).json({ message: "Parking not found" });
+    }
+
+    const totalSlotsNum = Number(capParking.totalSlots || 0);
+    if (Number.isFinite(totalSlotsNum) && totalSlotsNum > 0) {
+      const bookableLimit = computeBookableLimit(totalSlotsNum);
+      const nowForCap = new Date();
+      const activeBookings = await Booking.countDocuments(
+        buildActiveBookingsCapacityQuery({ parkingId, now: nowForCap })
+      );
+      if (activeBookings >= bookableLimit) {
+        return res.status(400).json({ message: "Parking Full" });
+      }
+    }
+
+    const conflictBuffer = computeConflictBuffer(totalSlotsNum);
+
     const parking = await Parking.findOneAndUpdate(
-      { _id: parkingId, availableSlots: { $gt: 0 } },
+      { _id: parkingId, availableSlots: { $gt: conflictBuffer } },
       { $inc: { availableSlots: -1 } },
       { new: true }
     );
 
     if (!parking) {
-      return res.status(400).json({ message: "No slots available" });
+      return res.status(400).json({ message: "Parking Full" });
     }
 
     const hours = Math.ceil((endDateTime - startDateTime) / (1000 * 60 * 60));

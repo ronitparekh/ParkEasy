@@ -4,6 +4,10 @@ import User from "../models/User.js";
 import { normalizePlate } from "../utils/plate.js";
 import { getDistanceKm } from "../utils/distance.js";
 import {
+  buildActiveBookingsCapacityQuery,
+  computeBookableLimit,
+} from "../utils/capacity.js";
+import {
   formatIstDateYmd,
   getBookingStartEndIst,
   getTodayIstRange,
@@ -337,6 +341,22 @@ export const createBooking = async (req, res) => {
     const parking = await Parking.findById(parkingId);
     if (!parking) {
       return res.status(404).json({ message: "Parking not found" });
+    }
+
+    // Internal conflict buffer capacity (does NOT change what UI displays).
+    // conflict_buffer = max(2, ceil(10% of total_slots))
+    // bookable_limit = total_slots - conflict_buffer
+    const totalSlotsNum = Number(parking.totalSlots || 0);
+    if (Number.isFinite(totalSlotsNum) && totalSlotsNum > 0) {
+      const bookableLimit = computeBookableLimit(totalSlotsNum);
+      const now = new Date();
+      const activeBookings = await Booking.countDocuments(
+        buildActiveBookingsCapacityQuery({ parkingId: parking._id, now })
+      );
+
+      if (activeBookings >= bookableLimit) {
+        return res.status(400).json({ message: "Parking Full" });
+      }
     }
 
     if (parking.availableSlots <= 0) {
