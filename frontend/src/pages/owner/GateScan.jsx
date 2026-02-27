@@ -567,10 +567,6 @@ export default function GateScan() {
           <div className="grid lg:grid-cols-2 gap-6">
             <div className="bg-[#0f172a] border border-white/10 rounded-2xl p-5">
               <h2 className="text-lg font-semibold">Number Plate Recognition</h2>
-              <p className="text-gray-400 text-sm mt-1">
-                Using PlateRecogniser API for high accuracy plate detection
-              </p>
-
               <div className="mt-4 rounded-2xl overflow-hidden border border-white/10 bg-black/20">
                 <video ref={videoRef} className="w-full h-64 object-cover" playsInline muted />
               </div>

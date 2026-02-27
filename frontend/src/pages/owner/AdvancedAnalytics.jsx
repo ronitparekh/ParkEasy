@@ -428,12 +428,8 @@ export default function AdvancedAnalytics() {
             </Panel>
           </div>
 
-          <div className="grid lg:grid-cols-3 gap-6">
-            <Panel
-              className="lg:col-span-2"
-              title="Top parkings"
-              subtitle="Net revenue comparison (top 5)"
-            >
+          <div className="grid gap-6">
+            <Panel title="Top parkings" subtitle="Net revenue comparison (top 5)">
               {computed.topParkings.length === 0 ? (
                 <p className="text-gray-400">No data yet.</p>
               ) : (
@@ -449,62 +445,39 @@ export default function AdvancedAnalytics() {
                           borderColor: "rgba(34,197,94,0.95)",
                           borderWidth: 1,
                           borderRadius: 10,
+                          borderSkipped: false,
                         },
                       ],
                     }}
                     options={{
+                      indexAxis: "y",
                       responsive: true,
                       maintainAspectRatio: false,
                       plugins: {
-                        legend: { labels: { color: "rgba(255,255,255,0.75)" } },
+                        legend: { display: false },
                         tooltip: { intersect: false },
                       },
+                      layout: { padding: { left: 4, right: 8, top: 6, bottom: 2 } },
                       scales: {
                         x: {
+                          ticks: { color: "rgba(255,255,255,0.55)", precision: 0 },
+                          grid: { color: "rgba(255,255,255,0.06)" },
+                        },
+                        y: {
                           ticks: {
                             color: "rgba(255,255,255,0.55)",
-                            maxRotation: 0,
                             callback: function (value) {
                               const label = this.getLabelForValue(value);
-                              return String(label).length > 18
-                                ? String(label).slice(0, 18) + "…"
+                              return String(label).length > 26
+                                ? String(label).slice(0, 26) + "…"
                                 : label;
                             },
                           },
                           grid: { display: false },
                         },
-                        y: {
-                          ticks: { color: "rgba(255,255,255,0.55)" },
-                          grid: { color: "rgba(255,255,255,0.06)" },
-                        },
                       },
                     }}
                   />
-                </div>
-              )}
-            </Panel>
-
-            <Panel title="Status breakdown" subtitle="Quick counts">
-              {Object.keys(computed.countsByStatus).length === 0 ? (
-                <p className="text-gray-400">No data yet.</p>
-              ) : (
-                <div className="flex-1 min-h-72 sm:min-h-80 flex flex-col gap-2">
-                  {Object.entries(computed.countsByStatus)
-                    .sort((a, b) => b[1] - a[1])
-                    .slice(0, 10)
-                    .map(([k, v]) => (
-                      <div
-                        key={k}
-                        className="rounded-xl border border-white/10 bg-black/20 px-4 py-3 flex items-center justify-between gap-3"
-                      >
-                        <p className="text-sm text-gray-200 break-all min-w-0">
-                          {k}
-                        </p>
-                        <p className="text-sm font-semibold text-white shrink-0">
-                          {v}
-                        </p>
-                      </div>
-                    ))}
                 </div>
               )}
             </Panel>
