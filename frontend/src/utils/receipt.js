@@ -63,7 +63,7 @@ export async function downloadReceipt(booking) {
   /* ================= DETAILS ================= */
   let y = 60;
   const leftX = 25;
-  const rightX = 90; // 🔥 FIXED
+  const rightX = 90; // FIXED
   const gap = 14;
 
   leftLabel("Booking ID", leftX, y);
@@ -104,7 +104,7 @@ export async function downloadReceipt(booking) {
   /* ================= QR SECTION ================= */
   const qrData = await QRCode.toDataURL(booking._id);
 
-  const qrX = 125; // 🔥 FIXED
+  const qrX = 125; // FIXED
   const qrY = 55;
 
   doc.setFillColor(30, 30, 30);

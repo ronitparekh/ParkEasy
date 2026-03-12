@@ -60,7 +60,7 @@ export default function OwnerBookings() {
             case "OVERSTAYED":
                 return "text-amber-300";
             case "COMPLETED":
-                return "text-gray-200";
+                return "text-green-600";
             case "CANCELLED":
                 return "text-red-400";
             case "EXPIRED":

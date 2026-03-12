@@ -497,7 +497,9 @@ export const cancelBooking = async (req, res) => {
 
     let refundPercent = 0;
 
-    if (
+    if (start && now.getTime() >= start.getTime()) {
+      refundPercent = 0;
+    } else if (
       booking.payment?.status === "PAID" &&
       booking.payment?.paidAt &&
       now.getTime() - new Date(booking.payment.paidAt).getTime() <= 2 * 60 * 1000
