@@ -211,117 +211,117 @@ export default function History() {
                                         key={b._id}
                                         className="bg-[#0f172a] border border-white/10 rounded-2xl p-6 mb-6"
                                     >
-                                {/* HEADER */}
-                                <div className="flex flex-col sm:flex-row sm:justify-between sm:items-start gap-3">
-                                    <div>
-                                        <h3 className="text-xl font-semibold">
-                                            {parkingName}
-                                        </h3>
-                                        <p className="text-sm text-gray-400">
-                                            Vehicle: {b.vehicleNumber}
-                                        </p>
-                                    </div>
+                                        {/* HEADER */}
+                                        <div className="flex flex-col sm:flex-row sm:justify-between sm:items-start gap-3">
+                                            <div>
+                                                <h3 className="text-xl font-semibold">
+                                                    {parkingName}
+                                                </h3>
+                                                <p className="text-sm text-gray-400">
+                                                    Vehicle: {b.vehicleNumber}
+                                                </p>
+                                            </div>
 
-                                    <span
-                                        className={`px-3 py-1 rounded-full text-xs font-medium
-                    ${b.status === "UPCOMING"
-                                                ? "bg-blue-500/20 text-blue-400"
-                                                : b.status === "ACTIVE"
-                                                    ? "bg-green-500/20 text-green-400"
-                                                    : b.status === "CHECKED_IN"
-                                                        ? "bg-cyan-500/20 text-cyan-300"
-                                                        : b.status === "OVERSTAYED"
-                                                            ? "bg-amber-500/20 text-amber-300"
-                                                            : b.status === "COMPLETED"
-                                                                ? "bg-gray-500/20 text-gray-200"
-                                                                : b.status === "CANCELLED"
-                                                                    ? "bg-red-500/20 text-red-400"
-                                                                    : "bg-gray-500/20 text-gray-300"
-                                        }
+                                            <span
+                                                className={`px-3 py-1 rounded-full text-xs font-medium
+                                                        ${b.status === "UPCOMING"
+                                                        ? "bg-blue-500/20 text-blue-400"
+                                                        : b.status === "ACTIVE"
+                                                            ? "bg-green-500/20 text-green-400"
+                                                            : b.status === "CHECKED_IN"
+                                                                ? "bg-cyan-500/20 text-cyan-300"
+                                                                : b.status === "OVERSTAYED"
+                                                                    ? "bg-amber-500/20 text-amber-300"
+                                                                    : b.status === "COMPLETED"
+                                                                        ? "bg-green-600/20 text-green-600"
+                                                                        : b.status === "CANCELLED"
+                                                                            ? "bg-red-500/20 text-red-400"
+                                                                            : "bg-gray-500/20 text-gray-300"
+                                                    }
                   `}
-                                    >
-                                        {b.status}
-                                    </span>
-                                </div>
+                                            >
+                                                {b.status}
+                                            </span>
+                                        </div>
 
-                                {/* DETAILS */}
-                                <div className="mt-4 text-sm text-gray-300 space-y-1">
-                                    <p>
-                                        Date:{" "}
-                                        {new Date(
-                                            b.bookingDate || b.createdAt
-                                        ).toLocaleDateString()}
-                                    </p>
-                                    <p>
-                                        Time: {b.startTime} – {b.endTime}
-                                    </p>
-                                    <p>Duration: {b.duration} hrs</p>
-                                    <p className="text-white font-semibold">
-                                        Total Paid: ₹{b.totalPrice}
-                                    </p>
+                                        {/* DETAILS */}
+                                        <div className="mt-4 text-sm text-gray-300 space-y-1">
+                                            <p>
+                                                Date:{" "}
+                                                {new Date(
+                                                    b.bookingDate || b.createdAt
+                                                ).toLocaleDateString()}
+                                            </p>
+                                            <p>
+                                                Time: {b.startTime} – {b.endTime}
+                                            </p>
+                                            <p>Duration: {b.duration} hrs</p>
+                                            <p className="text-white font-semibold">
+                                                Total Paid: ₹{b.totalPrice}
+                                            </p>
 
-                                    {b.status === "CANCELLED" && Number(b.refundAmount || 0) > 0 ? (
-                                        <p className="text-amber-300 font-semibold">
-                                            Refund: ₹{Number(b.refundAmount || 0)}
-                                            {typeof b.refundPercent === "number" ? ` (${Math.round(b.refundPercent * 100)}%)` : ""}
-                                        </p>
-                                    ) : null}
+                                            {b.status === "CANCELLED" && Number(b.refundAmount || 0) > 0 ? (
+                                                <p className="text-amber-300 font-semibold">
+                                                    Refund: ₹{Number(b.refundAmount || 0)}
+                                                    {typeof b.refundPercent === "number" ? ` (${Math.round(b.refundPercent * 100)}%)` : ""}
+                                                </p>
+                                            ) : null}
 
-                                    {(Number(b.overstayFineDue || 0) > 0 || Number(b.overstayFine || 0) > 0) ? (
-                                        <p className="text-amber-300 font-semibold">
-                                            Overstay Fine: ₹{Number(b.overstayFineDue || b.overstayFine || 0)}
-                                        </p>
-                                    ) : null}
+                                            {(Number(b.overstayFineDue || 0) > 0 || Number(b.overstayFine || 0) > 0) ? (
+                                                <p className="text-amber-300 font-semibold">
+                                                    Overstay Fine: ₹{Number(b.overstayFineDue || b.overstayFine || 0)}
+                                                </p>
+                                            ) : null}
 
-                                    {queueHoldActive ? (
-                                        <p className="text-cyan-300 font-semibold">
-                                            Queue hold active (10 min)
-                                        </p>
-                                    ) : null}
-                                </div>
+                                            {queueHoldActive ? (
+                                                <p className="text-cyan-300 font-semibold">
+                                                    Queue hold active (10 min)
+                                                </p>
+                                            ) : null}
+                                        </div>
 
-                                {/* ACTIONS */}
-                                <div className="mt-5 flex flex-wrap gap-3">
-                                    <button
-                                        onClick={() =>
-                                            openDirections(
-                                                parkingLat,
-                                                parkingLng
-                                            )
-                                        }
-                                        disabled={!canDirections}
-                                        className="px-4 py-2 border border-white/20 rounded-xl hover:bg-white/10"
-                                    >
-                                        Directions
-                                    </button>
+                                        {/* ACTIONS */}
+                                        <div className="mt-5 flex flex-wrap gap-3">
+                                            <button
+                                                onClick={() =>
+                                                    openDirections(
+                                                        parkingLat,
+                                                        parkingLng
+                                                    )
+                                                }
+                                                disabled={!canDirections}
+                                                className="px-4 py-2 border border-white/20 rounded-xl hover:bg-white/10"
+                                            >
+                                                Directions
+                                            </button>
 
-                                    <button
-                                        onClick={() => downloadReceipt(b)}
-                                        className="px-4 py-2 border border-white/20 rounded-xl hover:bg-white/10"
-                                    >
-                                        Receipt
-                                    </button>
+                                            <button
+                                                onClick={() => downloadReceipt(b)}
+                                                className="px-4 py-2 border border-white/20 rounded-xl hover:bg-white/10"
+                                            >
+                                                Receipt
+                                            </button>
 
-                                    {(["UPCOMING", "ACTIVE"].includes(b.status)) && (
-                                        <button
-                                            onClick={() => cancelBooking(b._id)}
-                                            className="px-4 py-2 bg-red-500/20 text-red-400 rounded-xl hover:bg-red-500/30"
-                                        >
-                                            Cancel
-                                        </button>
-                                    )}
+                                            {(["UPCOMING", "ACTIVE"].includes(b.status)) && (
+                                                <button
+                                                    onClick={() => cancelBooking(b._id)}
+                                                    className="px-4 py-2 bg-red-500/20 text-red-400 rounded-xl hover:bg-red-500/30"
+                                                >
+                                                    Cancel
+                                                </button>
+                                            )}
 
-                                    {(b.status === "ACTIVE" && gate === "PENDING_ENTRY" && !queueHoldActive) ? (
-                                        <button
-                                            onClick={() => markArrivedAtGate(b._id, parkingLat, parkingLng)}
-                                            disabled={!canDirections}
-                                            className="px-4 py-2 border border-white/20 rounded-xl hover:bg-white/10 disabled:opacity-50"
-                                        >
-                                            Arrived at gate
-                                        </button>
-                                    ) : null}
-                                </div>
-                            </div>
+                                            {(b.status === "ACTIVE" && gate === "PENDING_ENTRY" && !queueHoldActive) ? (
+                                                <button
+                                                    onClick={() => markArrivedAtGate(b._id, parkingLat, parkingLng)}
+                                                    disabled={!canDirections}
+                                                    className="px-4 py-2 border border-white/20 rounded-xl hover:bg-white/10 disabled:opacity-50"
+                                                >
+                                                    Arrived at gate
+                                                </button>
+                                            ) : null}
+                                        </div>
+                                    </div>
                                 );
                             })
                     )}

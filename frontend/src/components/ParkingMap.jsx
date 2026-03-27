@@ -7,17 +7,20 @@ import {
   Circle,
   useMap,
 } from "react-leaflet";
+import { useEffect } from "react";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 
 function RecenterOnUser({ userLocation }) {
   const map = useMap();
 
-  if (userLocation?.lat && userLocation?.lng) {
-    map.setView([userLocation.lat, userLocation.lng], map.getZoom(), {
-      animate: true,
-    });
-  }
+  useEffect(() => {
+    if (userLocation?.lat && userLocation?.lng) {
+      map.setView([userLocation.lat, userLocation.lng], map.getZoom(), {
+        animate: true,
+      });
+    }
+  }, [map, userLocation?.lat, userLocation?.lng]);
 
   return null;
 }
@@ -119,7 +122,7 @@ export default function ParkingMap({
             },
           }}
         >
-          <Popup>{p.name}</Popup>
+          <Popup autoPan={false}>{p.name}</Popup>
         </Marker>
       ))}
     </MapContainer>

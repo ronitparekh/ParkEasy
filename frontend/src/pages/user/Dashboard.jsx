@@ -7,6 +7,7 @@ import UserNavbar from "../../components/UserNavbar";
 
 export default function UserDashboard() {
   const mapRef = useRef(null);
+  const mapSectionRef = useRef(null);
 
   // USER LOCATION
   const [userLocation, setUserLocation] = useState(null);
@@ -150,16 +151,27 @@ export default function UserDashboard() {
   function handleCardSelect(parking) {
     setSelectedParkingId(parking._id);
 
-    if (mapRef.current) {
-      mapRef.current.setView([parking.lat, parking.lng], 16, {
-        animate: true,
-      });
-    }
+    // scroll user to the map section
+    mapSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
 
-    // open popup of marker
+    const lat = Number(parking.lat);
+    const lng = Number(parking.lng);
+
+    // Wait a tick so the scroll/layout settles, then resize + center the map.
     setTimeout(() => {
-      markerRefs.current[parking._id]?.openPopup?.();
-    }, 150);
+      if (!mapRef.current) return;
+      if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
+
+      // If the map container size changed due to scrolling/layout, Leaflet needs this.
+      mapRef.current.invalidateSize(true);
+      mapRef.current.flyTo([lat, lng], 16, { animate: true });
+
+      // open popup of marker (after flyTo starts)
+      // open popup of marker (after the move starts)
+      setTimeout(() => {
+        markerRefs.current[parking._id]?.openPopup?.();
+      }, 200);
+    }, 250);
   }
 
   return (
@@ -217,7 +229,7 @@ export default function UserDashboard() {
           </div>
 
           {/* MAP */}
-          <div className="mb-10">
+          <div ref={mapSectionRef} className="mb-10">
             <ParkingMap
               mapRef={mapRef}
               userLocation={userLocation}
