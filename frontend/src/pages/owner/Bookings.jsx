@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import OwnerNavbar from "../../components/OwnerNavbar";
 import api from "../../api/api";
 import { useSearchParams } from "react-router-dom";
+import useRealtimeRefresh from "../../hooks/useRealtimeRefresh";
 
 
 export default function OwnerBookings() {
@@ -12,35 +13,30 @@ export default function OwnerBookings() {
     const [searchParams] = useSearchParams();
     const parkingId = searchParams.get("parkingId");
 
-    useEffect(() => {
-        let alive = true;
+    async function loadBookings({ silent = false } = {}) {
+        if (!silent) setLoading(true);
+        setError(null);
 
-        async function load() {
-            setLoading(true);
-            setError(null);
-
-            try {
-                const res = await api.get("/booking/owner", {
-                    params: parkingId ? { parkingId } : {},
-                });
-                if (!alive) return;
-                setBookings(res.data ?? []);
-            } catch (e) {
-                if (!alive) return;
-                setError(
-                    e?.response?.data?.message ||
-                    "Failed to load bookings."
-                );
-            } finally {
-                if (alive) setLoading(false);
-            }
+        try {
+            const res = await api.get("/booking/owner", {
+                params: parkingId ? { parkingId } : {},
+            });
+            setBookings(res.data ?? []);
+        } catch (e) {
+            setError(
+                e?.response?.data?.message ||
+                "Failed to load bookings."
+            );
+        } finally {
+            if (!silent) setLoading(false);
         }
+    }
 
-        load();
-        return () => {
-            alive = false;
-        };
+    useEffect(() => {
+        loadBookings();
     }, [parkingId]);
+
+    useRealtimeRefresh(() => loadBookings({ silent: true }));
 
     function formatWhen(b) {
         const d = b.bookingDate ? new Date(b.bookingDate) : null;

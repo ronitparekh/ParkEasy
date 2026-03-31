@@ -4,6 +4,7 @@ import SearchBar from "../../components/SearchBar";
 import ParkingCard from "../../components/ParkingCard";
 import ParkingMap from "../../components/ParkingMap";
 import UserNavbar from "../../components/UserNavbar";
+import useRealtimeRefresh from "../../hooks/useRealtimeRefresh";
 
 export default function UserDashboard() {
   const mapRef = useRef(null);
@@ -29,6 +30,9 @@ export default function UserDashboard() {
 
   // ✅ store refs of marker instances for popup open
   const markerRefs = useRef({});
+
+  // Keep latest query options so background refresh can re-use current filters.
+  const lastQueryRef = useRef(null);
 
   function zoomTo(lat, lng, zoom = 14) {
     if (mapRef.current) {
@@ -78,9 +82,10 @@ export default function UserDashboard() {
     useDistance,
     search,
     zoomAfter = false,
+    silent = false,
   }) {
     try {
-      setLoading(true);
+      if (!silent) setLoading(true);
 
       const params = {};
       if (search) params.search = search;
@@ -94,6 +99,14 @@ export default function UserDashboard() {
       const res = await api.get("/parking/nearby", { params });
       setParkings(res.data);
 
+      lastQueryRef.current = {
+        lat,
+        lng,
+        distance,
+        useDistance,
+        search,
+      };
+
       // reset selection when new data loads
       setSelectedParkingId(null);
 
@@ -103,9 +116,18 @@ export default function UserDashboard() {
     } catch (err) {
       console.error("Failed to fetch parkings", err);
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   }
+
+  useRealtimeRefresh(async () => {
+    if (!lastQueryRef.current) return;
+    await fetchParkings({
+      ...lastQueryRef.current,
+      zoomAfter: false,
+      silent: true,
+    });
+  });
 
   function handleSearch() {
     fetchParkings({

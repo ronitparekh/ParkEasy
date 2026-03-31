@@ -3,6 +3,7 @@ import api from "../../api/api";
 import OwnerNavbar from "../../components/OwnerNavbar";
 import LocationPickerMap from "../../components/LocationPickerMap";
 import { useNavigate } from "react-router-dom";
+import useRealtimeRefresh from "../../hooks/useRealtimeRefresh";
 
 export default function OwnerParkings() {
   const [parkings, setParkings] = useState([]);
@@ -28,6 +29,8 @@ export default function OwnerParkings() {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     fetchParkings();
   }, []);
+
+  useRealtimeRefresh(fetchParkings, { enabled: !editOpen });
 
   function startEdit(p) {
     setEditingId(p._id);

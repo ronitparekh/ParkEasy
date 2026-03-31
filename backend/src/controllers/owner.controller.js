@@ -1,6 +1,7 @@
 import mongoose from "mongoose";
 import Parking from "../models/Parking.js";
 import Booking from "../models/Booking.js";
+import { emitDataUpdated } from "../realtime/socket.js";
 
 export const getOwnerParkings = async (req, res) => {
   try {
@@ -55,6 +56,8 @@ export const addOwnerParking = async (req, res) => {
         : {}),
       ownerId: req.user.id,
     });
+
+    emitDataUpdated({ type: "PARKING_CREATED", parkingId: String(parking._id) });
 
     res.status(201).json(parking);
   } catch (err) {
@@ -129,6 +132,7 @@ export const updateOwnerParking = async (req, res) => {
     }
 
     await parking.save();
+    emitDataUpdated({ type: "PARKING_UPDATED", parkingId: String(parking._id) });
     res.json(parking);
   } catch (err) {
     console.error(err);
@@ -159,6 +163,7 @@ export const deleteOwnerParking = async (req, res) => {
     }
 
     await Parking.deleteOne({ _id: parking._id });
+    emitDataUpdated({ type: "PARKING_DELETED", parkingId: String(parking._id) });
     res.json({ message: "Parking deleted" });
   } catch (err) {
     console.error(err);

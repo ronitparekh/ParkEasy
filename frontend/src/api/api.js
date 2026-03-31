@@ -1,7 +1,7 @@
 import axios from "axios";
 
 const envBaseUrl = (import.meta.env.VITE_API_URL || "").trim();
-const baseURL = envBaseUrl
+export const baseURL = envBaseUrl
   ? envBaseUrl.replace(/\/+$/, "")
   : import.meta.env.DEV
     ? "http://localhost:5000"

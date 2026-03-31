@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import api from "../../api/api";
 import OwnerNavbar from "../../components/OwnerNavbar";
+import useRealtimeRefresh from "../../hooks/useRealtimeRefresh";
 
 import {
   Chart as ChartJS,
@@ -95,35 +96,30 @@ export default function AdvancedAnalytics() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
-  useEffect(() => {
-    let alive = true;
+  async function loadAnalytics({ silent = false } = {}) {
+    try {
+      if (!silent) setLoading(true);
+      setError("");
 
-    async function load() {
-      try {
-        setLoading(true);
-        setError("");
+      const [statsRes, bookingsRes] = await Promise.all([
+        api.get("/owner/dashboard"),
+        api.get("/booking/owner"),
+      ]);
 
-        const [statsRes, bookingsRes] = await Promise.all([
-          api.get("/owner/dashboard"),
-          api.get("/booking/owner"),
-        ]);
-
-        if (!alive) return;
-        setStats(statsRes.data);
-        setBookings(Array.isArray(bookingsRes.data) ? bookingsRes.data : []);
-      } catch (e) {
-        if (!alive) return;
-        setError(e?.response?.data?.message || "Failed to load analytics");
-      } finally {
-        if (alive) setLoading(false);
-      }
+      setStats(statsRes.data);
+      setBookings(Array.isArray(bookingsRes.data) ? bookingsRes.data : []);
+    } catch (e) {
+      setError(e?.response?.data?.message || "Failed to load analytics");
+    } finally {
+      if (!silent) setLoading(false);
     }
+  }
 
-    load();
-    return () => {
-      alive = false;
-    };
+  useEffect(() => {
+    loadAnalytics();
   }, []);
+
+  useRealtimeRefresh(() => loadAnalytics({ silent: true }));
 
   const computed = useMemo(() => {
     const all = bookings || [];

@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import api from "../../api/api";
 import ParkingMap from "../../components/ParkingMap";
 import OwnerNavbar from "../../components/OwnerNavbar";
+import useRealtimeRefresh from "../../hooks/useRealtimeRefresh";
 
 function Stat({ title, value }) {
   return (
@@ -21,13 +22,9 @@ export default function OwnerDashboard() {
 
   useEffect(() => {
     loadDashboard();
-
-    const id = setInterval(() => {
-      loadStats();
-    }, 5000);
-
-    return () => clearInterval(id);
   }, []);
+
+  useRealtimeRefresh(() => loadDashboard());
 
   async function loadStats() {
     try {

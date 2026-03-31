@@ -25,6 +25,7 @@
     "multer": "^2.0.2",
     "node-cron": "^4.2.1",
     "razorpay": "^2.9.6",
+    "socket.io": "^4.8.1",
     "uuid": "^13.0.0"
   },
   "devDependencies": {

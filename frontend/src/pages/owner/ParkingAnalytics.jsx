@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import api from "../../api/api";
 import OwnerNavbar from "../../components/OwnerNavbar";
+import useRealtimeRefresh from "../../hooks/useRealtimeRefresh";
 
 import {
     Chart as ChartJS,
@@ -99,44 +100,38 @@ export default function ParkingAnalytics() {
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState("");
 
-    useEffect(() => {
-        let alive = true;
+    async function loadAnalytics({ silent = false } = {}) {
+        try {
+            if (!silent) setLoading(true);
+            setError("");
 
-        async function load() {
-            try {
-                setLoading(true);
-                setError("");
+            const [parkingsRes, bookingsRes] = await Promise.all([
+                api.get("/owner/parkings"),
+                api.get("/booking/owner"),
+            ]);
 
-                const [parkingsRes, bookingsRes] = await Promise.all([
-                    api.get("/owner/parkings"),
-                    api.get("/booking/owner"),
-                ]);
+            const ownerParkings = Array.isArray(parkingsRes.data) ? parkingsRes.data : [];
+            const p = ownerParkings.find((x) => String(x?._id) === String(parkingId));
+            setParking(p || null);
 
-                if (!alive) return;
-
-                const ownerParkings = Array.isArray(parkingsRes.data) ? parkingsRes.data : [];
-                const p = ownerParkings.find((x) => String(x?._id) === String(parkingId));
-                setParking(p || null);
-
-                const allBookings = Array.isArray(bookingsRes.data) ? bookingsRes.data : [];
-                const filtered = allBookings.filter((b) => {
-                    const pid = b?.parkingId?._id || b?.parkingId;
-                    return String(pid || "") === String(parkingId || "");
-                });
-                setBookings(filtered);
-            } catch (e) {
-                if (!alive) return;
-                setError(e?.response?.data?.message || "Failed to load parking analytics");
-            } finally {
-                if (alive) setLoading(false);
-            }
+            const allBookings = Array.isArray(bookingsRes.data) ? bookingsRes.data : [];
+            const filtered = allBookings.filter((b) => {
+                const pid = b?.parkingId?._id || b?.parkingId;
+                return String(pid || "") === String(parkingId || "");
+            });
+            setBookings(filtered);
+        } catch (e) {
+            setError(e?.response?.data?.message || "Failed to load parking analytics");
+        } finally {
+            if (!silent) setLoading(false);
         }
+    }
 
-        load();
-        return () => {
-            alive = false;
-        };
+    useEffect(() => {
+        loadAnalytics();
     }, [parkingId]);
+
+    useRealtimeRefresh(() => loadAnalytics({ silent: true }));
 
     const computed = useMemo(() => {
         const all = bookings || [];

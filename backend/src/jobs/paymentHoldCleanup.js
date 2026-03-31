@@ -1,11 +1,13 @@
 import cron from "node-cron";
 import Booking from "../models/Booking.js";
 import Parking from "../models/Parking.js";
+import { emitDataUpdated } from "../realtime/socket.js";
 
 export const startPaymentHoldCleanupJob = () => {
   cron.schedule("* * * * *", async () => {
     try {
       const now = new Date();
+      let changed = false;
 
       const expired = await Booking.find({
         status: "PENDING_PAYMENT",
@@ -30,7 +32,12 @@ export const startPaymentHoldCleanupJob = () => {
           await Parking.findByIdAndUpdate(b.parkingId, {
             $inc: { availableSlots: 1 },
           });
+          changed = true;
         }
+      }
+
+      if (changed) {
+        emitDataUpdated({ type: "PAYMENT_HOLD_EXPIRED" });
       }
     } catch (err) {
       console.error("Payment hold cleanup job error:", err);

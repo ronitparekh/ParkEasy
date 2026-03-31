@@ -7,6 +7,7 @@ import {
   buildActiveBookingsCapacityQuery,
   computeBookableLimit,
   computeConflictBuffer,
+  countOverlappingBookings,
 } from "../utils/capacity.js";
 import {
   formatIstDateYmd,
@@ -14,6 +15,8 @@ import {
   makeUtcDateFromIstParts,
   parseYmd,
 } from "../utils/ist.js";
+import { calculateDynamicPrice } from "../utils/price.js";
+import { emitDataUpdated } from "../realtime/socket.js";
 
 function getRazorpayClient() {
   const keyId = process.env.RAZORPAY_KEY_ID;
@@ -141,39 +144,53 @@ export async function createRazorpayOrder(req, res) {
       });
     }
 
-    // Atomically hold a slot
-    const capParking = await Parking.findById(parkingId).select("totalSlots");
-    if (!capParking) {
+    // Fetch parking and check capacity by counting bookings that overlap with requested time slot
+    let parking = await Parking.findById(parkingId);
+    if (!parking) {
       return res.status(404).json({ message: "Parking not found" });
     }
 
-    const totalSlotsNum = Number(capParking.totalSlots || 0);
-    if (Number.isFinite(totalSlotsNum) && totalSlotsNum > 0) {
-      const bookableLimit = computeBookableLimit(totalSlotsNum);
-      const nowForCap = new Date();
-      const activeBookings = await Booking.countDocuments(
-        buildActiveBookingsCapacityQuery({ parkingId, now: nowForCap })
-      );
-      if (activeBookings >= bookableLimit) {
-        return res.status(400).json({ message: "Parking Full" });
-      }
+    const totalSlotsNum = Number(parking.totalSlots || 0);
+    if (!Number.isFinite(totalSlotsNum) || totalSlotsNum <= 0) {
+      return res.status(400).json({ message: "Invalid parking configuration" });
     }
 
-    const conflictBuffer = computeConflictBuffer(totalSlotsNum);
+    // Check capacity by counting bookings that overlap with requested time slot on the same date.
+    const overlappingBookings = await Booking.find({
+      parkingId,
+      bookingDate: bookingDateOnly,
+    });
 
-    const parking = await Parking.findOneAndUpdate(
-      { _id: parkingId, availableSlots: { $gt: conflictBuffer } },
-      { $inc: { availableSlots: -1 } },
-      { new: true }
-    );
+    const overlappingCount = countOverlappingBookings(overlappingBookings, {
+      bookingDate: bookingDateOnly,
+      startTime,
+      endTime,
+    });
 
-    if (!parking) {
-      return res.status(400).json({ message: "Parking Full" });
+    if (overlappingCount >= totalSlotsNum) {
+      return res.status(400).json({ message: "All slots booked for this time slot" });
+    }
+
+    // For today's bookings, decrement availableSlots; for future dates, don't touch it
+    const today = new Date();
+    const todayUTC = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate(), 0, 0, 0));
+    const isToday = bookingDateOnly.getTime() === todayUTC.getTime();
+
+    if (isToday) {
+      parking.availableSlots = Math.max(0, Number(parking.availableSlots || 0) - 1);
+      await parking.save();
     }
 
     const hours = Math.ceil((endDateTime - startDateTime) / (1000 * 60 * 60));
     const duration = Math.max(1, hours);
-    const totalPrice = duration * Number(parking.price);
+    const pricing = calculateDynamicPrice({
+      baseRate: parking.price,
+      durationHours: duration,
+      totalSlots: parking.totalSlots,
+      availableSlots: isToday ? parking.availableSlots : parking.totalSlots - overlappingCount,
+      bookingDateYmd: bookingDateStr,
+    });
+    const totalPrice = pricing.totalPrice;
 
     const user = await User.findById(userId).select("name email phone");
 
@@ -200,6 +217,7 @@ export async function createRazorpayOrder(req, res) {
         status: "CREATED",
       },
     });
+    emitDataUpdated({ type: "BOOKING_CREATED", bookingId: String(booking._id), parkingId: String(parkingId) });
 
     try {
       const order = await razorpay.orders.create({
@@ -215,6 +233,7 @@ export async function createRazorpayOrder(req, res) {
 
       booking.payment.orderId = order.id;
       await booking.save();
+      emitDataUpdated({ type: "BOOKING_UPDATED", bookingId: String(booking._id), parkingId: String(parkingId) });
 
       res.status(201).json({
         bookingId: booking._id,
@@ -234,6 +253,7 @@ export async function createRazorpayOrder(req, res) {
         },
       });
       await Parking.findByIdAndUpdate(parkingId, { $inc: { availableSlots: 1 } });
+      emitDataUpdated({ type: "BOOKING_UPDATED", bookingId: String(booking._id), parkingId: String(parkingId) });
 
       console.error(err);
       return res.status(500).json({ message: "Failed to create Razorpay order" });
@@ -304,6 +324,7 @@ export async function verifyRazorpayPayment(req, res) {
       await booking.save();
 
       await Parking.findByIdAndUpdate(booking.parkingId, { $inc: { availableSlots: 1 } });
+      emitDataUpdated({ type: "BOOKING_UPDATED", bookingId: String(booking._id), parkingId: String(booking.parkingId) });
       return res.status(400).json({ message: "Booking time has already passed" });
     }
 
@@ -320,6 +341,7 @@ export async function verifyRazorpayPayment(req, res) {
     booking.holdExpiresAt = undefined;
 
     await booking.save();
+    emitDataUpdated({ type: "BOOKING_UPDATED", bookingId: String(booking._id), parkingId: String(booking.parkingId) });
 
     res.json({ message: "Payment verified", booking });
   } catch (err) {

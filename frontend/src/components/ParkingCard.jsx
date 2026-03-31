@@ -60,7 +60,7 @@ export default function ParkingCard({ parking, selected, onSelect }) {
             Available:{" "}
             <span className={bookableAvailable > 0 ? "text-green-400" : "text-red-400"}>
               {bookableAvailable}
-            </span>
+            </span> (For the Current Time)
           </p>
         </div>
       </div>

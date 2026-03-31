@@ -2,6 +2,7 @@ import cron from "node-cron";
 import Booking from "../models/Booking.js";
 import Parking from "../models/Parking.js";
 import { getBookingStartEndIst } from "../utils/ist.js";
+import { emitDataUpdated } from "../realtime/socket.js";
 
 function bumpSlots(parking) {
   if (!parking) return;
@@ -15,6 +16,7 @@ export const startBookingAutoCompleteJob = () => {
   cron.schedule("* * * * *", async () => {
     try {
       const now = new Date();
+      let changed = false;
 
       // Drive booking status transitions.
       // NOTE: We never auto-complete. Completion happens only on exit scan.
@@ -34,6 +36,7 @@ export const startBookingAutoCompleteJob = () => {
         if (checkedOut && booking.status !== "COMPLETED") {
           booking.status = "COMPLETED";
           await booking.save();
+          changed = true;
           continue;
         }
 
@@ -41,6 +44,7 @@ export const startBookingAutoCompleteJob = () => {
         if (checkedIn && booking.status !== "OVERSTAYED" && booking.status !== "CHECKED_IN") {
           booking.status = "CHECKED_IN";
           await booking.save();
+          changed = true;
           continue;
         }
 
@@ -48,6 +52,7 @@ export const startBookingAutoCompleteJob = () => {
         if (booking.status === "UPCOMING" && now >= start) {
           booking.status = "ACTIVE";
           await booking.save();
+          changed = true;
           continue;
         }
 
@@ -61,11 +66,13 @@ export const startBookingAutoCompleteJob = () => {
           if (now >= expireAt) {
             booking.status = "EXPIRED";
             await booking.save();
+            changed = true;
 
             const parking = await Parking.findById(booking.parkingId);
             if (parking) {
               bumpSlots(parking);
               await parking.save();
+              changed = true;
             }
 
             continue;
@@ -78,9 +85,14 @@ export const startBookingAutoCompleteJob = () => {
           if (now.getTime() > end.getTime() + exitGraceMs) {
             booking.status = "OVERSTAYED";
             await booking.save();
+            changed = true;
             continue;
           }
         }
+      }
+
+      if (changed) {
+        emitDataUpdated({ type: "BOOKING_BATCH_UPDATED" });
       }
     } catch (err) {
       console.error("Auto-complete job error:", err);

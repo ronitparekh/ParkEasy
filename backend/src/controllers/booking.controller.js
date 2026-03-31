@@ -6,6 +6,7 @@ import { getDistanceKm } from "../utils/distance.js";
 import {
   buildActiveBookingsCapacityQuery,
   computeBookableLimit,
+  countOverlappingBookings,
 } from "../utils/capacity.js";
 import {
   formatIstDateYmd,
@@ -14,6 +15,8 @@ import {
   makeUtcDateFromIstParts,
   parseYmd,
 } from "../utils/ist.js";
+import { calculateDynamicPrice } from "../utils/price.js";
+import { emitDataUpdated } from "../realtime/socket.js";
 
 const ARRIVED_GATE_MAX_DISTANCE_KM = 0.05; // 50m
 const ARRIVED_GATE_HOLD_MS = 10 * 60 * 1000; // 10 minutes
@@ -159,6 +162,7 @@ export const arrivedAtGate = async (req, res) => {
     booking.queueHoldRevokedAt = undefined;
     booking.queueHoldRevokedReason = undefined;
     await booking.save();
+    emitDataUpdated({ type: "BOOKING_UPDATED", bookingId: String(booking._id), parkingId: String(booking.parkingId) });
 
     return res.json({ message: "Arrival recorded", booking });
   } catch (err) {
@@ -198,6 +202,7 @@ export const revokeArrivedAtGate = async (req, res) => {
     booking.queueHoldRevokedAt = now;
     booking.queueHoldRevokedReason = "OUT_OF_RANGE";
     await booking.save();
+    emitDataUpdated({ type: "BOOKING_UPDATED", bookingId: String(booking._id), parkingId: String(booking.parkingId) });
 
     return res.json({ message: "Queue hold revoked", booking });
   } catch (err) {
@@ -343,34 +348,38 @@ export const createBooking = async (req, res) => {
       return res.status(404).json({ message: "Parking not found" });
     }
 
-    // Internal conflict buffer capacity (does NOT change what UI displays).
-    // conflict_buffer = max(2, ceil(10% of total_slots))
-    // bookable_limit = total_slots - conflict_buffer
+    // Check capacity by counting bookings that overlap with requested time slot on the same date.
+    // Only bookings with time overlap consume slots; same-date non-overlapping bookings don't.
     const totalSlotsNum = Number(parking.totalSlots || 0);
     if (Number.isFinite(totalSlotsNum) && totalSlotsNum > 0) {
-      const bookableLimit = computeBookableLimit(totalSlotsNum);
-      const now = new Date();
-      const activeBookings = await Booking.countDocuments(
-        buildActiveBookingsCapacityQuery({ parkingId: parking._id, now })
-      );
+      const overlappingBookings = await Booking.find({
+        parkingId: parking._id,
+        bookingDate: bookingDateOnly,
+      });
 
-      if (activeBookings >= bookableLimit) {
-        return res.status(400).json({ message: "Parking Full" });
+      const overlappingCount = countOverlappingBookings(overlappingBookings, {
+        bookingDate: bookingDateOnly,
+        startTime,
+        endTime,
+      });
+
+      if (overlappingCount >= totalSlotsNum) {
+        return res.status(400).json({ message: "All slots booked for this time slot" });
       }
     }
-
-    if (parking.availableSlots <= 0) {
-      return res.status(400).json({ message: "No slots available" });
-    }
-
-    parking.availableSlots -= 1;
-    await parking.save();
 
     const hours = Math.ceil(
       (endDateTime - startDateTime) / (1000 * 60 * 60)
     );
     const duration = Math.max(1, hours);
-    const totalPrice = duration * Number(parking.price);
+    const pricing = calculateDynamicPrice({
+      baseRate: parking.price,
+      durationHours: duration,
+      totalSlots: parking.totalSlots,
+      availableSlots: parking.availableSlots,
+      bookingDateYmd: bookingDateStr,
+    });
+    const totalPrice = pricing.totalPrice;
 
     if (clientDuration && Number(clientDuration) !== duration) {
     }
@@ -404,6 +413,8 @@ export const createBooking = async (req, res) => {
       totalPrice,
       status: initialStatus,
     });
+
+    emitDataUpdated({ type: "BOOKING_CREATED", bookingId: String(booking._id), parkingId: String(parkingId) });
 
     res.status(201).json(booking);
   } catch (err) {
@@ -533,6 +544,8 @@ export const cancelBooking = async (req, res) => {
       await parking.save();
     }
 
+    emitDataUpdated({ type: "BOOKING_CANCELLED", bookingId: String(booking._id), parkingId: String(booking.parkingId) });
+
     res.json({
       message: "Booking cancelled",
       refundPercent,
@@ -598,6 +611,7 @@ export const ownerCheckInByPlate = async (req, res) => {
     };
 
     await booking.save();
+    emitDataUpdated({ type: "BOOKING_UPDATED", bookingId: String(booking._id), parkingId: String(booking.parkingId) });
     return res.json({ message: "Checked in", booking });
   } catch (err) {
     console.error(err);
@@ -655,6 +669,8 @@ export const ownerCheckOutByPlate = async (req, res) => {
     bumpSlotsOnCheckout(parking);
     await parking.save();
 
+    emitDataUpdated({ type: "BOOKING_UPDATED", bookingId: String(booking._id), parkingId: String(booking.parkingId) });
+
     return res.json({ message: "Checked out", booking });
   } catch (err) {
     console.error(err);
@@ -711,6 +727,7 @@ export const ownerCheckInByBookingId = async (req, res) => {
       booking.entryMethod = "QR";
       booking.status = "CHECKED_IN";
       await booking.save();
+      emitDataUpdated({ type: "BOOKING_UPDATED", bookingId: String(booking._id), parkingId: String(booking.parkingId) });
     }
 
     return res.json({ message: "Checked in", booking });
@@ -766,6 +783,8 @@ export const ownerCheckOutByBookingId = async (req, res) => {
 
     bumpSlotsOnCheckout(parking);
     await parking.save();
+
+    emitDataUpdated({ type: "BOOKING_UPDATED", bookingId: String(booking._id), parkingId: String(booking.parkingId) });
 
     return res.json({ message: "Checked out", booking });
   } catch (err) {

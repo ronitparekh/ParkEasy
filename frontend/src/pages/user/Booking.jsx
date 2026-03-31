@@ -61,6 +61,8 @@ export default function Booking() {
     const [parking, setParking] = useState(null);
     const [loading, setLoading] = useState(true);
     const [loadingProfile, setLoadingProfile] = useState(true);
+    const [pricing, setPricing] = useState(null);
+    const [loadingPricing, setLoadingPricing] = useState(false);
 
     useEffect(() => {
         let isActive = true;
@@ -143,10 +145,41 @@ export default function Booking() {
         return addHoursToTimeStr(startTime, durationHours);
     }, [startTime, durationHours]);
 
+    useEffect(() => {
+        let alive = true;
+
+        async function fetchDynamicPricing() {
+            if (!parkingId || !bookingDate || !startTime || !endTime) {
+                setPricing(null);
+                return;
+            }
+
+            try {
+                setLoadingPricing(true);
+                const res = await api.post(`/parking/${parkingId}/price-quote`, {
+                    bookingDate,
+                    startTime,
+                    endTime,
+                });
+                if (alive) setPricing(res.data);
+            } catch (e) {
+                console.error("Failed to fetch dynamic pricing", e);
+                setPricing(null);
+            } finally {
+                if (alive) setLoadingPricing(false);
+            }
+        }
+
+        fetchDynamicPricing();
+        return () => {
+            alive = false;
+        };
+    }, [parkingId, bookingDate, startTime, endTime]);
+
     const duration = durationHours;
 
-    const pricePerHour = Number(parking?.price || 0);
-    const totalPrice = duration * pricePerHour;
+    const pricePerHour = pricing?.effectiveHourlyRate || 0;
+    const totalPrice = pricing?.totalPrice || 0;
 
     function handleConfirm() {
         if (!parkingId) {
@@ -300,10 +333,16 @@ export default function Booking() {
                     {/* SUMMARY */}
                     <div className="mt-6 border-t border-white/10 pt-4 text-sm text-gray-300">
                         <p>Duration: {duration} hrs</p>
-                        <p>Price / hr: ₹{pricePerHour}</p>
-                        <p className="text-white font-semibold">
-                            Total: ₹{totalPrice}
-                        </p>
+                        {loadingPricing ? (
+                            <p className="text-gray-400">Calculating dynamic price...</p>
+                        ) : (
+                            <>
+                                <p>Price / hr: ₹{pricePerHour || 0} <span className="text-gray-400 text-xs"></span></p>
+                                <p className="text-white font-semibold">
+                                    Total: ₹{totalPrice || 0}
+                                </p>
+                            </>
+                        )}
                     </div>
 
                     <button

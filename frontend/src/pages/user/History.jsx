@@ -3,6 +3,7 @@ import api from "../../api/api";
 import { downloadReceipt } from "../../utils/receipt";
 import { getDistanceKm } from "../../utils/distance";
 import UserNavbar from "../../components/UserNavbar";
+import useRealtimeRefresh from "../../hooks/useRealtimeRefresh";
 
 const ARRIVED_GATE_MAX_DISTANCE_KM = 0.05; // 50m
 
@@ -15,6 +16,8 @@ export default function History() {
     useEffect(() => {
         fetchBookings();
     }, []);
+
+    useRealtimeRefresh(fetchBookings);
 
     useEffect(() => {
         return () => {
